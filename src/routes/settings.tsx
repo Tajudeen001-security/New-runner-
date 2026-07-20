@@ -1,8 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, Download, Eye, EyeOff, Upload, X } from "lucide-react";
-import { K, lsGet, lsSet, DEFAULT_SETTINGS, type Settings } from "../lib/storage";
+import { Check, Download, Eye, EyeOff, Plus, Trash2, Upload, X } from "lucide-react";
+import {
+  K,
+  lsGet,
+  lsSet,
+  uid,
+  DEFAULT_SETTINGS,
+  getSettings,
+  type Settings,
+  type Project,
+  type EnvVar,
+} from "../lib/storage";
 import { NVIDIA_MODELS } from "../lib/nvidia";
 import {
   applyBackup,
@@ -40,7 +50,7 @@ function SettingsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setSettings(lsGet<Settings>(K.settings, DEFAULT_SETTINGS));
+    setSettings(getSettings());
     setHydrated(true);
   }, []);
 
@@ -82,7 +92,7 @@ function SettingsPage() {
       toast.success(
         `Restored — ${res.projects} project${res.projects === 1 ? "" : "s"}, ${res.skills} skill${res.skills === 1 ? "" : "s"}, ${res.messages} message${res.messages === 1 ? "" : "s"}`,
       );
-      setSettings(lsGet<Settings>(K.settings, DEFAULT_SETTINGS));
+      setSettings(getSettings());
       setPendingRestore(null);
     } catch (err: any) {
       toast.error(err?.message ?? "Import failed");
@@ -262,9 +272,46 @@ function SettingsPage() {
           </div>
         </Row>
 
-        {/* Backup */}
+        {/* Behavior toggles */}
         <Row
           label="05"
+          title="Behavior"
+          subtitle="How JagX handles the build, on phones especially."
+        >
+          <div className="space-y-3">
+            <ToggleRow
+              title="Auto-jump to Preview on phones"
+              body="Off: press the Preview button yourself once a build starts, like Lovable. On: JagX switches you there automatically."
+              checked={settings.autoPreview}
+              onChange={(v) => update("autoPreview", v)}
+            />
+            <ToggleRow
+              title="Show the model's reasoning"
+              body="Some models stream their thinking separately from the plan — show it while they work."
+              checked={settings.showReasoning}
+              onChange={(v) => update("showReasoning", v)}
+            />
+            <ToggleRow
+              title="Ask before building when unclear"
+              body="If a request could go several ways (data model, auth provider, style), JagX asks 1–3 quick questions first instead of guessing."
+              checked={settings.askBeforeBuilding}
+              onChange={(v) => update("askBeforeBuilding", v)}
+            />
+          </div>
+        </Row>
+
+        {/* Environment variables */}
+        <Row
+          label="06"
+          title="Environment variables"
+          subtitle="Track what a project needs for real deployment — nothing here is ever sent to the model."
+        >
+          <EnvVarsManager />
+        </Row>
+
+        {/* Backup */}
+        <Row
+          label="07"
           title="Backup & restore"
           subtitle="Everything — projects, chats, skills, settings — as a single JSON file."
         >
@@ -390,6 +437,172 @@ function ModeOption({
       </div>
       <p className="mt-1 pl-5 text-xs text-muted-foreground">{body}</p>
     </button>
+  );
+}
+
+function ToggleRow({
+  title,
+  body,
+  checked,
+  onChange,
+}: {
+  title: string;
+  body: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg border border-border/60 bg-card/40 p-3">
+      <div>
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{body}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-6 w-11 flex-none items-center rounded-full transition-colors ${
+          checked ? "bg-gold" : "bg-border"
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${
+            checked ? "translate-x-6" : "translate-x-1"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+function EnvVarsManager() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [vars, setVars] = useState<EnvVar[]>([]);
+  const [showValues, setShowValues] = useState(false);
+
+  useEffect(() => {
+    const ps = lsGet<Project[]>(K.projects, []);
+    setProjects(ps);
+    if (ps[0]) setProjectId(ps[0].id);
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setVars(lsGet<EnvVar[]>(K.envVars(projectId), []));
+  }, [projectId]);
+
+  function persist(next: EnvVar[]) {
+    setVars(next);
+    if (projectId) lsSet(K.envVars(projectId), next);
+  }
+
+  if (projects.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed border-border/60 bg-card/30 p-3 text-sm text-muted-foreground">
+        Create a project first — then track the environment variables it needs right here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <select
+        value={projectId}
+        onChange={(e) => setProjectId(e.target.value)}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-gold/60"
+      >
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+
+      <div className="space-y-2 rounded-lg border border-border/60 bg-card/50 p-3">
+        {vars.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No variables yet. Add whatever your backend code needs — e.g. DATABASE_URL, AUTH_SECRET, STRIPE_SECRET_KEY.
+          </p>
+        )}
+        {vars.map((v) => (
+          <div key={v.id} className="flex flex-wrap items-center gap-2">
+            <input
+              value={v.key}
+              onChange={(e) =>
+                persist(
+                  vars.map((x) =>
+                    x.id === v.id
+                      ? { ...x, key: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_") }
+                      : x,
+                  ),
+                )
+              }
+              placeholder="DATABASE_URL"
+              className="min-w-[140px] flex-1 rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:border-gold/60"
+            />
+            <input
+              type={showValues ? "text" : "password"}
+              value={v.value}
+              onChange={(e) =>
+                persist(vars.map((x) => (x.id === v.id ? { ...x, value: e.target.value } : x)))
+              }
+              placeholder="value"
+              className="min-w-[140px] flex-1 rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs outline-none focus:border-gold/60"
+            />
+            <select
+              value={v.scope}
+              onChange={(e) =>
+                persist(
+                  vars.map((x) =>
+                    x.id === v.id ? { ...x, scope: e.target.value as EnvVar["scope"] } : x,
+                  ),
+                )
+              }
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none"
+              title="Server-only vars never reach the browser bundle. Client-exposed vars (e.g. VITE_/NEXT_PUBLIC_ prefixed) are safe to ship."
+            >
+              <option value="server">Server-only</option>
+              <option value="client">Client-exposed</option>
+            </select>
+            <button
+              onClick={() => persist(vars.filter((x) => x.id !== v.id))}
+              className="rounded-md p-1.5 text-muted-foreground hover:text-destructive"
+              aria-label="Remove variable"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between pt-1">
+          <button
+            onClick={() =>
+              persist([...vars, { id: uid(), key: "", value: "", scope: "server" }])
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:border-gold/60"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add variable
+          </button>
+          <button
+            onClick={() => setShowValues((s) => !s)}
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            {showValues ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {showValues ? "Hide" : "Show"} values
+          </button>
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Stored only on this device — never sent to the AI or anywhere else. To actually deploy: add
+        the same keys under your host's <span className="font-mono">Project → Settings → Environment
+        Variables</span> (e.g. Vercel), and for local development put them in a{" "}
+        <span className="font-mono">.env.local</span> file (already excluded by{" "}
+        <span className="font-mono">.gitignore</span> — never commit real secrets to GitHub).
+      </p>
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import {
   lsGet,
   lsSet,
   DEFAULT_SETTINGS,
+  getSettings,
   type ChatMessage,
   type Project,
   type Settings,
@@ -47,7 +48,7 @@ export function buildBackup(): Backup {
     exportedAt: new Date().toISOString(),
     app: "JagX Dev",
     data: {
-      settings: lsGet<Settings>(K.settings, DEFAULT_SETTINGS),
+      settings: getSettings(),
       projects,
       skills: lsGet<Skill[]>(K.skills, []),
       messages,
@@ -145,7 +146,7 @@ function changedSettingsCount(current: Settings, incoming: Settings) {
 
 export function buildRestorePreview(backup: Backup, mode: ImportMode): RestorePreview {
   const d = backup.data;
-  const currentSettings = lsGet<Settings>(K.settings, DEFAULT_SETTINGS);
+  const currentSettings = getSettings();
   const incomingSettings = d.settings ?? DEFAULT_SETTINGS;
   const currentProjects = lsGet<Project[]>(K.projects, []);
   const currentSkills = lsGet<Skill[]>(K.skills, []);
@@ -224,7 +225,7 @@ export function applyBackup(backup: Backup, mode: ImportMode): ImportResult {
   const d = backup.data;
 
   // Settings — always replace (single object)
-  if (d.settings) lsSet(K.settings, d.settings);
+  if (d.settings) lsSet(K.settings, { ...DEFAULT_SETTINGS, ...d.settings });
 
   // Skills — merge by id, incoming wins for duplicates
   const existingSkills = lsGet<Skill[]>(K.skills, []);

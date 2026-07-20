@@ -155,42 +155,42 @@ function RootComponent() {
 function TopNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
-        <Link to="/" className="flex items-center gap-2.5 group">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-2 px-3 sm:px-4">
+        <Link to="/" className="group flex min-w-0 flex-none items-center gap-2">
           <img
             src={logo}
             alt="JagX Dev"
-            className="h-8 w-8 rounded-md shadow-gold transition-transform group-hover:scale-105"
+            className="h-7 w-7 flex-none rounded-md shadow-gold transition-transform group-hover:scale-105 sm:h-8 sm:w-8"
             width={32}
             height={32}
           />
           <span
-            className="text-lg font-semibold tracking-tight"
+            className="truncate text-base font-semibold tracking-tight sm:text-lg"
             style={{ fontFamily: "var(--font-display)" }}
           >
             JagX <span className="text-gold-gradient">Dev</span>
           </span>
         </Link>
-        <nav className="flex items-center gap-1 text-sm">
+        <nav className="flex flex-none items-center gap-0.5 text-xs sm:gap-1 sm:text-sm">
           <Link
             to="/"
-            className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:px-3"
             activeOptions={{ exact: true }}
-            activeProps={{ className: "rounded-md px-3 py-1.5 bg-accent text-foreground" }}
+            activeProps={{ className: "rounded-md px-2 py-1.5 sm:px-3 bg-accent text-foreground" }}
           >
             Projects
           </Link>
           <Link
             to="/skills"
-            className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            activeProps={{ className: "rounded-md px-3 py-1.5 bg-accent text-foreground" }}
+            className="rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:px-3"
+            activeProps={{ className: "rounded-md px-2 py-1.5 sm:px-3 bg-accent text-foreground" }}
           >
             Skills
           </Link>
           <Link
             to="/settings"
-            className="rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            activeProps={{ className: "rounded-md px-3 py-1.5 bg-accent text-foreground" }}
+            className="rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:px-3"
+            activeProps={{ className: "rounded-md px-2 py-1.5 sm:px-3 bg-accent text-foreground" }}
           >
             Settings
           </Link>

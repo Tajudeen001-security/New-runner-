@@ -10,11 +10,14 @@ import {
   Copy,
   Eye,
   FileCode2,
+  Image as ImageIcon,
   Loader2,
+  Paperclip,
   Play,
   RefreshCw,
   Sparkles,
   Square,
+  X,
 } from "lucide-react";
 import {
   K,
@@ -22,6 +25,7 @@ import {
   lsSet,
   uid,
   DEFAULT_SETTINGS,
+  getSettings,
   type ChatMessage,
   type Project,
   type Settings,
@@ -43,6 +47,40 @@ export const Route = createFileRoute("/chat/$projectId")({
   component: ChatPage,
 });
 
+type Attachment = {
+  id: string;
+  name: string;
+  kind: "text" | "image" | "binary";
+  content?: string; // for text/code files
+  dataUrl?: string; // for images
+  size: number;
+};
+
+const TEXT_EXTENSIONS = new Set([
+  "html", "htm", "css", "js", "jsx", "ts", "tsx", "json", "md", "txt", "svg",
+  "yml", "yaml", "py", "java", "c", "cpp", "cs", "go", "rb", "php", "sql",
+  "env", "gitignore", "toml", "xml", "sh",
+]);
+
+function extOf(name: string) {
+  return name.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function langForExt(ext: string) {
+  const map: Record<string, string> = {
+    html: "html", htm: "html", css: "css", js: "javascript", jsx: "jsx",
+    ts: "typescript", tsx: "tsx", json: "json", md: "markdown", py: "python",
+    svg: "svg",
+  };
+  return map[ext] ?? "text";
+}
+
+function mergeGeneratedFiles(existing: GeneratedFile[], incoming: GeneratedFile[]): GeneratedFile[] {
+  const byPath = new Map(existing.map((f) => [f.path, f]));
+  for (const f of incoming) byPath.set(f.path, f);
+  return Array.from(byPath.values());
+}
+
 function ChatPage() {
   const { projectId } = Route.useParams();
   const navigate = useNavigate();
@@ -51,6 +89,8 @@ function ChatPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -68,7 +108,7 @@ function ChatPage() {
     const projects = lsGet<Project[]>(K.projects, []);
     const p = projects.find((x) => x.id === projectId) ?? null;
     setProject(p);
-    setSettings(lsGet<Settings>(K.settings, DEFAULT_SETTINGS));
+    setSettings(getSettings());
     const savedSkills = lsGet<Skill[]>(K.skills, BUILTIN_SKILLS);
     setSkills(savedSkills);
 
@@ -90,7 +130,7 @@ function ChatPage() {
     const pending = raw.some((m) => m && m.__pending);
     if (pending && clean.length > 0 && clean[clean.length - 1].role === "user") {
       lsSet(K.messages(projectId), clean);
-      setTimeout(() => runAssistant(clean, savedSkills, lsGet<Settings>(K.settings, DEFAULT_SETTINGS)), 50);
+      setTimeout(() => runAssistant(clean, savedSkills, getSettings()), 50);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -127,11 +167,17 @@ function ChatPage() {
     setStreamText("");
     setReasoningText("");
     setTab("preview");
-    setMobileView("output");
+    if (s.autoPreview) setMobileView("output");
     const ac = new AbortController();
     abortRef.current = ac;
 
-    const systemPrompt = buildSystemPrompt(skillList);
+    const envVarKeys = lsGet<{ key: string }[]>(K.envVars(projectId), [])
+      .map((v) => v.key)
+      .filter(Boolean);
+    const systemPrompt = buildSystemPrompt(skillList, {
+      askBeforeBuilding: s.askBeforeBuilding,
+      envVarKeys,
+    });
     const apiMessages = [
       { role: "system" as const, content: systemPrompt },
       ...base.map((m) => ({ role: m.role, content: m.content })),
@@ -194,18 +240,110 @@ function ChatPage() {
     }
   }
 
+  function readAsText(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result ?? ""));
+      r.onerror = () => reject(r.error);
+      r.readAsText(file);
+    });
+  }
+
+  function readAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result ?? ""));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function handleFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const incoming: Attachment[] = [];
+    const newProjectFiles: GeneratedFile[] = [];
+
+    for (const file of Array.from(fileList)) {
+      const ext = extOf(file.name);
+      try {
+        if (ext === "zip") {
+          const fflate = await import(/* @vite-ignore */ "https://esm.sh/fflate@0.8.2");
+          const buf = new Uint8Array(await file.arrayBuffer());
+          const unzipped: Record<string, Uint8Array> = await new Promise((resolve, reject) => {
+            fflate.unzip(buf, (err: any, data: any) => (err ? reject(err) : resolve(data)));
+          });
+          const decoder = new TextDecoder();
+          for (const [path, bytes] of Object.entries(unzipped)) {
+            if (path.endsWith("/") || path.includes("__MACOSX") || path.startsWith(".")) continue;
+            const e = extOf(path);
+            if (TEXT_EXTENSIONS.has(e)) {
+              const content = decoder.decode(bytes);
+              newProjectFiles.push({ path, lang: langForExt(e), content });
+            }
+          }
+          incoming.push({
+            id: uid(),
+            name: file.name,
+            kind: "binary",
+            size: file.size,
+          });
+        } else if (TEXT_EXTENSIONS.has(ext) || file.type.startsWith("text/")) {
+          const content = await readAsText(file);
+          incoming.push({ id: uid(), name: file.name, kind: "text", content, size: file.size });
+          newProjectFiles.push({ path: file.name, lang: langForExt(ext), content });
+        } else if (file.type.startsWith("image/")) {
+          const dataUrl = await readAsDataUrl(file);
+          incoming.push({ id: uid(), name: file.name, kind: "image", dataUrl, size: file.size });
+        } else {
+          incoming.push({ id: uid(), name: file.name, kind: "binary", size: file.size });
+        }
+      } catch {
+        toast.error(`Couldn't read ${file.name}`);
+      }
+    }
+
+    setAttachments((prev) => [...prev, ...incoming]);
+    // Show uploaded project files immediately — "read it, preview it as-is."
+    if (newProjectFiles.length > 0) {
+      persistFiles(mergeGeneratedFiles(files, newProjectFiles));
+      setTab(newProjectFiles.some((f) => f.path === "index.html") ? "preview" : "code");
+      toast.success(`Added ${newProjectFiles.length} file${newProjectFiles.length === 1 ? "" : "s"} to the project`);
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
   function send() {
     const text = input.trim();
-    if (!text || streaming) return;
+    if (!text && attachments.length === 0) return;
+    if (streaming) return;
+
+    let content = text;
+    for (const a of attachments) {
+      if (a.kind === "text" && a.content != null) {
+        content += `\n\n\`\`\`${langForExt(extOf(a.name))} ${a.name}\n${a.content}\n\`\`\``;
+      } else if (a.kind === "image" && a.dataUrl) {
+        content += `\n\n![${a.name}](${a.dataUrl})`;
+      } else {
+        content += `\n\n(Attached: ${a.name}, ${Math.round(a.size / 1024)}KB — already added to project files.)`;
+      }
+    }
+    if (!text && attachments.length > 0) {
+      content = `Here are the files I'm uploading — take a look and tell me what you see, or continue from them.${content}`;
+    }
+
     const userMsg: ChatMessage = {
       id: uid(),
       role: "user",
-      content: text,
+      content,
       createdAt: Date.now(),
     };
     const next = [...messages, userMsg];
     persistMessages(next);
     setInput("");
+    setAttachments([]);
     runAssistant(next, skills, settings);
   }
 
@@ -341,7 +479,7 @@ function ChatPage() {
 
           {streaming && (
             <BuildingCard
-              reasoning={reasoningText}
+              reasoning={settings.showReasoning ? reasoningText : ""}
               plan={livePlan}
               files={liveFiles}
               done={liveDone}
@@ -352,6 +490,30 @@ function ChatPage() {
         </div>
 
         <div className="border-t border-border/60 p-3">
+          {attachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {attachments.map((a) => (
+                <span
+                  key={a.id}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card px-2.5 py-1 text-[11px] text-muted-foreground"
+                >
+                  {a.kind === "image" ? (
+                    <ImageIcon className="h-3 w-3 text-gold" />
+                  ) : (
+                    <Paperclip className="h-3 w-3 text-gold" />
+                  )}
+                  <span className="max-w-[140px] truncate">{a.name}</span>
+                  <button
+                    onClick={() => removeAttachment(a.id)}
+                    className="text-muted-foreground/60 hover:text-destructive"
+                    aria-label={`Remove ${a.name}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="rounded-xl border border-border/70 bg-card p-2 focus-within:border-gold/50">
             <textarea
               value={input}
@@ -362,12 +524,29 @@ function ChatPage() {
                   send();
                 }
               }}
-              placeholder="Message JagX Dev…"
+              placeholder="Message JagX Dev… or attach files below"
               rows={2}
               className="w-full resize-none bg-transparent px-2 py-1 text-sm outline-none placeholder:text-muted-foreground/60"
             />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                handleFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
             <div className="flex items-center justify-between px-1 pt-1">
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  title="Attach files, images, or a .zip of a project"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                </button>
                 {messages.length > 0 && !streaming && (
                   <button
                     onClick={regenerate}
@@ -387,7 +566,7 @@ function ChatPage() {
               ) : (
                 <button
                   onClick={send}
-                  disabled={!input.trim()}
+                  disabled={!input.trim() && attachments.length === 0}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-gold-gradient text-primary-foreground shadow-gold disabled:opacity-40"
                   aria-label="Send"
                 >

@@ -65,6 +65,15 @@ export type Settings = {
   temperature: number;
   /** Max output tokens per turn. Multi-file builds need headroom. */
   maxTokens: number;
+  /** On phones: jump to the Preview tab automatically when a build starts.
+   * Off by default — press the Preview/Play button yourself, like Lovable. */
+  autoPreview: boolean;
+  /** Show the model's live reasoning/thinking text while it plans, for
+   * models that stream a separate reasoning channel. */
+  showReasoning: boolean;
+  /** Let the agent pause and ask clarifying questions before building when
+   * a request is genuinely ambiguous, instead of guessing. */
+  askBeforeBuilding: boolean;
 };
 
 /** A single file in a project's virtual workspace. */
@@ -74,6 +83,19 @@ export type ProjectFile = {
   content: string;
 };
 
+/** An environment variable the user has noted for a project. Stored locally
+ * only — JagX never sends these to the model or anywhere else. They exist so
+ * you have one place tracking what needs to be set in Vercel/`.env.local`. */
+export type EnvVar = {
+  id: string;
+  key: string;
+  value: string;
+  /** Client-exposed vars are safe to ship in the bundle (e.g. NEXT_PUBLIC_/VITE_ prefixed).
+   * Server-only vars (API keys, DB URLs) must never be prefixed that way. */
+  scope: "server" | "client";
+  note?: string;
+};
+
 export const K = {
   projects: "jagx:projects",
   messages: (projectId: string) => `jagx:messages:${projectId}`,
@@ -81,6 +103,8 @@ export const K = {
   code: (projectId: string) => `jagx:code:${projectId}`,
   /** Full multi-file workspace for a project. */
   files: (projectId: string) => `jagx:files:${projectId}`,
+  /** Environment variable notes for a project (local-only, never sent anywhere). */
+  envVars: (projectId: string) => `jagx:envvars:${projectId}`,
   skills: "jagx:skills",
   settings: "jagx:settings",
 };
@@ -90,8 +114,18 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "nvidia/nemotron-3-super-120b-a12b",
   temperature: 0.5,
   maxTokens: 16000,
+  autoPreview: false,
+  showReasoning: true,
+  askBeforeBuilding: true,
 };
 
 export function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+/** Always use this instead of a raw lsGet(K.settings, ...) — it fills in any
+ * fields missing from settings saved by an older version of the app. */
+export function getSettings(): Settings {
+  const stored = lsGet<Partial<Settings>>(K.settings, {});
+  return { ...DEFAULT_SETTINGS, ...stored };
 }

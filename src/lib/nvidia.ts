@@ -21,7 +21,7 @@ export type NvidiaModel = {
 // 404s, Settings → "Custom NVIDIA model ID" lets a user paste the current
 // slug straight from build.nvidia.com/models without waiting on an app update.
 export const NVIDIA_MODELS: NvidiaModel[] = [
-  // --- NVIDIA (best for hard / agentic builds) ---
+  // --- NVIDIA Nemotron 3 (current generation) ---
   {
     id: "nvidia/nemotron-3-ultra-550b-a55b",
     label: "Nemotron 3 Ultra",
@@ -46,23 +46,80 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Small and very fast — quick edits and tight iteration loops",
     family: "NVIDIA",
     speed: "fast",
-    context: "1M tokens",
+    context: "256K tokens",
   },
   {
+    id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    label: "Nemotron 3 Nano Omni",
+    hint: "Multimodal — reasons over text, image, video, and audio in one pass",
+    family: "NVIDIA",
+    speed: "balanced",
+    context: "256K tokens",
+  },
+  {
+    id: "nvidia/nemotron-nano-12b-v2-vl",
+    label: "Nemotron Nano 12B VL",
+    hint: "Vision-language — reads screenshots, docs, and charts you attach",
+    family: "NVIDIA",
+    speed: "balanced",
+    context: "128K tokens",
+  },
+  // --- NVIDIA Nemotron (previous generation, still solid) ---
+  {
     id: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-    label: "Nemotron Super 49B",
+    label: "Nemotron Super 49B v1.5",
     hint: "Efficient previous-gen NVIDIA reasoning model",
     family: "NVIDIA",
     speed: "balanced",
     context: "128K tokens",
   },
   {
+    id: "nvidia/llama-3.3-nemotron-super-49b-v1",
+    label: "Nemotron Super 49B",
+    hint: "Reliable reasoning/tool-calling model derived from Llama 3.3 70B",
+    family: "NVIDIA",
+    speed: "balanced",
+    context: "128K tokens",
+  },
+  {
+    id: "nvidia/llama-3.1-nemotron-70b-instruct",
+    label: "Nemotron 70B",
+    hint: "Tuned for helpfulness and precise, well-aligned answers",
+    family: "NVIDIA",
+    speed: "balanced",
+    context: "128K tokens",
+  },
+  {
+    id: "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+    label: "Nemotron Ultra 253B",
+    hint: "Previous-gen NVIDIA flagship reasoning model",
+    family: "NVIDIA",
+    speed: "deep",
+    context: "128K tokens",
+  },
+  {
     id: "nvidia/nemotron-nano-9b-v2",
     label: "Nemotron Nano 9B",
-    hint: "Small and very fast — quick edits and tight iteration loops",
+    hint: "Small, controllable reasoning toggle — fast day-to-day driver",
     family: "NVIDIA",
     speed: "fast",
     context: "128K tokens",
+  },
+  {
+    id: "nvidia/llama-3.1-nemotron-nano-8b-v1",
+    label: "Nemotron Nano 8B",
+    hint: "Tiny and quick — single-GPU friendly, good for snappy iteration",
+    family: "NVIDIA",
+    speed: "fast",
+    context: "128K tokens",
+  },
+  {
+    id: "nvidia/nemotron-4-340b-instruct",
+    label: "Nemotron-4 340B",
+    hint: "Large chat model, strong for synthetic data and structured text",
+    family: "NVIDIA",
+    speed: "deep",
+    context: "4K tokens",
   },
   // --- Coding specialists ---
   {
@@ -105,7 +162,15 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     speed: "fast",
     context: "128K tokens",
   },
-  // --- Reasoning ---
+  {
+    id: "qwen/qwq-32b",
+    label: "QwQ 32B",
+    hint: "Explicit chain-of-thought — good for tricky logic and math-heavy code",
+    family: "Qwen",
+    speed: "deep",
+    context: "32K tokens",
+  },
+  // --- Reasoning / general MoE ---
   {
     id: "deepseek-ai/deepseek-v4-flash",
     label: "DeepSeek V4 Flash",
@@ -122,6 +187,14 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     speed: "deep",
     context: "1M tokens",
   },
+  {
+    id: "openai/gpt-oss-120b",
+    label: "GPT-OSS 120B",
+    hint: "Open-weight general model, solid all-rounder for chat and code",
+    family: "OpenAI (open)",
+    speed: "deep",
+    context: "128K tokens",
+  },
   // --- General purpose ---
   {
     id: "meta/llama-3.3-70b-instruct",
@@ -129,6 +202,14 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Reliable general-purpose chat and coding",
     family: "Meta",
     speed: "balanced",
+    context: "128K tokens",
+  },
+  {
+    id: "meta/llama-3.1-405b-instruct",
+    label: "Llama 3.1 405B",
+    hint: "Meta's largest — deep reasoning for hard, high-stakes tasks",
+    family: "Meta",
+    speed: "deep",
     context: "128K tokens",
   },
   {
@@ -146,6 +227,46 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     family: "Mistral",
     speed: "fast",
     context: "64K tokens",
+  },
+  {
+    id: "mistralai/mistral-nemo-12b-instruct",
+    label: "Mistral NeMo 12B",
+    hint: "Built with NVIDIA — strong performance-to-size ratio",
+    family: "Mistral",
+    speed: "fast",
+    context: "128K tokens",
+  },
+  {
+    id: "google/gemma-3-27b-it",
+    label: "Gemma 3 27B",
+    hint: "Google's open model — good general chat and light coding",
+    family: "Google",
+    speed: "balanced",
+    context: "128K tokens",
+  },
+  {
+    id: "microsoft/phi-4",
+    label: "Phi-4",
+    hint: "Small, sharp reasoning model — good for fast iteration",
+    family: "Microsoft",
+    speed: "fast",
+    context: "16K tokens",
+  },
+  {
+    id: "ibm/granite-3.3-8b-instruct",
+    label: "Granite 3.3 8B",
+    hint: "IBM's compact enterprise-tuned model — quick and dependable",
+    family: "IBM",
+    speed: "fast",
+    context: "128K tokens",
+  },
+  {
+    id: "sarvamai/sarvam-m",
+    label: "Sarvam-M",
+    hint: "Specialized for Indic languages alongside English",
+    family: "Sarvam AI",
+    speed: "balanced",
+    context: "32K tokens",
   },
 ];
 

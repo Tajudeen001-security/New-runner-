@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Check, Github, Loader2, Package, Plus, Sparkles, Trash2, X } from "lucide-react";
-import { K, lsGet, lsSet, uid, DEFAULT_SETTINGS, type Settings, type Skill } from "../lib/storage";
+import { K, lsGet, lsSet, uid, DEFAULT_SETTINGS, getSettings, type Settings, type Skill } from "../lib/storage";
 import { BUILTIN_SKILLS } from "../lib/skills";
 import { nvidiaChat } from "../lib/nvidia";
 
@@ -437,7 +437,7 @@ function NewSkillDialog({
       toast.error("Describe the skill you want");
       return;
     }
-    const settings = lsGet<Settings>(K.settings, DEFAULT_SETTINGS);
+    const settings = getSettings();
     if (!settings.nvidiaApiKey) {
       toast.error("Add your NVIDIA API key in Settings first");
       return;
