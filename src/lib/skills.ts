@@ -711,7 +711,7 @@ export const CORE_SYSTEM_PROMPT = `You are JagX Dev — an elite AI development 
 Before anything else: if the request is genuinely ambiguous in a way that would change the architecture (which auth, what the data model looks like, what pages/roles exist, a specific visual style), ask up to 3 short, concrete questions instead of guessing, and wait for the user's answer before writing files. Don't ask about things you can just decide well (pick a sensible modern default and say so in the Plan) — only ask when the answer would meaningfully change what you build, or the user's request is too thin to act on safely.
 
 Once you have enough to build, always answer in this order:
-1. Start with a section titled exactly "### Plan" containing 3-6 short bullet points describing what you are about to build or change. Keep each bullet under 15 words. No fluff.
+1. Start with a section titled exactly "### Plan". For anything beyond a one-line tweak — and always for a new app, a clone of a real product, or anything with more than a couple of files — this must be a real design pass, not a summary written after the fact: decide the page/route structure, the data model, and the key components *before* you write any file, then list 3-6 short bullets reflecting those decisions. Keep each bullet under 15 words. Only skip the Plan for genuinely trivial one-line edits to an existing file.
 2. Then write the actual files. Every file goes in its own fenced code block, and the opening fence MUST include the language and the file path separated by a space, e.g.:
    \`\`\`tsx src/App.tsx
    ...
@@ -724,7 +724,9 @@ Once you have enough to build, always answer in this order:
 4. After the files, add a short "### Done" note: one or two sentences on what you built, plus a "### Environment Variables" list if the build needs any (see below). Skip both for tiny tweaks.
 
 Runtime constraints — this workspace has NO bundler, NO npm install, and NO Node server. Files are executed directly in the browser:
-- React/TSX/JSX files run as in-browser Babel-transpiled scripts, NOT ES modules. Do NOT use \`import\`/\`export\` in these files — they will throw. Instead, define components as plain global functions/consts (e.g. \`function App() { ... }\`, \`function TodoItem({ item }) { ... }\`) and just reference them directly; the last component named \`App\` (or \`Main\`) is auto-mounted to #root. Use \`React.useState\`, \`React.useEffect\` etc. (React and ReactDOM are already loaded globally).
+- React/TSX/JSX files run as in-browser Babel-transpiled scripts, NOT ES modules. NEVER use \`import\`/\`export\` in these files (including \`import { createRoot } from "react-dom/client"\`, \`export default function App()\`, etc.) — a single leftover import/export line makes the ENTIRE file fail to run and the preview goes blank with nothing rendered. Instead, define components as plain global functions/consts (e.g. \`function App() { ... }\`, \`function TodoItem({ item }) { ... }\`). React and ReactDOM are already loaded globally.
+- NEVER call \`createRoot\`/\`ReactDOM.render\`/\`.render(<App/>)\` yourself. The runtime finds whichever top-level component is named \`App\` (or \`Main\`) and mounts it automatically. Just define that component and stop — writing your own mount code is redundant and a common source of bugs here.
+- Any error is now shown as a visible overlay in the preview instead of a blank screen — if you see one reported back to you, it names the exact file and line; fix that specific problem rather than rewriting everything.
 - A global \`db\` object is always available for client-side persistence, backed by localStorage so data survives reloads: \`db.read(collection)\` returns an array (creating it empty on first use), \`db.write(collection, array)\` saves it, \`db.uid()\` makes a short id. Use this for any app that needs to "save" data in the live preview (todos, notes, carts, posts) — it makes CRUD actually work end-to-end in preview, not just look like it does.
 
 Building full-stack apps (the user wants something that works "for real", not just a mockup):
@@ -872,6 +874,101 @@ window.db = (function () {
 })();
 </script>`;
 
+/** Surfaces any error as a readable overlay instead of a silent blank
+ * preview — this is the single most important fix for "nothing shows up":
+ * every failure is now visible and points at the actual problem. */
+const ERROR_OVERLAY_SCRIPT = `
+<script>
+window.__jagxShowError = function (title, detail) {
+  var el = document.getElementById("__jagx_error__");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "__jagx_error__";
+    el.style.cssText = "position:fixed;inset:0;background:#1a0d0d;color:#ff9b9b;font:12px/1.6 ui-monospace,Menlo,Consolas,monospace;padding:20px;white-space:pre-wrap;overflow:auto;z-index:2147483647;";
+    document.body.appendChild(el);
+  }
+  el.textContent = title + (detail ? ("\\n\\n" + detail) : "");
+  try {
+    window.parent.postMessage({ source: "jagx-preview", type: "error", title: title, detail: detail || "" }, "*");
+  } catch (e) {}
+};
+window.addEventListener("error", function (e) {
+  window.__jagxShowError("Runtime error", (e.error && e.error.stack) || e.message);
+});
+window.addEventListener("unhandledrejection", function (e) {
+  window.__jagxShowError("Unhandled promise rejection", (e.reason && e.reason.stack) || String(e.reason));
+});
+</script>`;
+
+/** Aliases the React hooks/mount functions as bare globals too, so code
+ * that forgets the `React.`/`ReactDOM.` prefix (a common habit from
+ * ES-module-era training data) still works instead of throwing
+ * "createRoot is not defined". */
+const REACT_GLOBALS_SCRIPT = `
+<script>
+window.useState = React.useState; window.useEffect = React.useEffect;
+window.useRef = React.useRef; window.useMemo = React.useMemo;
+window.useCallback = React.useCallback; window.useContext = React.useContext;
+window.createContext = React.createContext; window.Fragment = React.Fragment;
+window.createRoot = ReactDOM.createRoot;
+</script>`;
+
+/**
+ * Manually transpiles and evaluates every React/TS file in dependency-safe
+ * order, in true global scope (via indirect eval, so declarations are
+ * visible to files that run after it — same sharing model as separate
+ * classic <script> tags). Any transform or runtime error is caught per-file
+ * and shown in the error overlay instead of failing silently.
+ *
+ * Also strips stray import/export statements before transforming — the
+ * system prompt tells the model not to use them (there's no bundler here),
+ * but this is a safety net for when a model writes them out of habit.
+ */
+function reactBootstrapScript(files: GeneratedFile[]): string {
+  const payload = JSON.stringify(files.map((f) => ({ path: f.path, content: f.content })));
+  return `
+<script>
+(function () {
+  function sanitize(code) {
+    code = code.replace(/import\\s*(?:[\\w*{}\\s,]+)\\s*from\\s*['"][^'"]+['"];?/g, "");
+    code = code.replace(/^[ \\t]*import\\s+['"][^'"]+['"];?[ \\t]*$/gm, "");
+    code = code.replace(/^[ \\t]*export\\s+default\\s+/gm, "");
+    code = code.replace(/^[ \\t]*export\\s+(?=(function|const|class|let|var)\\b)/gm, "");
+    code = code.replace(/^[ \\t]*export\\s*\\{[^}]*\\};?[ \\t]*$/gm, "");
+    return code;
+  }
+  var files = ${payload};
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    try {
+      var out = Babel.transform(sanitize(f.content), {
+        presets: [["react", { runtime: "classic" }], ["typescript", { isTSX: true, allExtensions: true }]],
+        filename: f.path,
+      }).code;
+      (0, eval)(out);
+    } catch (err) {
+      window.__jagxShowError("Error in " + f.path, (err && err.stack) || String(err));
+      return;
+    }
+  }
+  try {
+    var Entry = typeof App !== "undefined" ? App : (typeof Main !== "undefined" ? Main : null);
+    if (Entry) {
+      var rootEl = document.getElementById("root") || document.getElementById("app") || document.body;
+      ReactDOM.createRoot(rootEl).render(React.createElement(Entry));
+    } else {
+      window.__jagxShowError(
+        "Nothing to render",
+        "No component named App or Main was found. Define one at the top level and it mounts automatically."
+      );
+    }
+  } catch (err) {
+    window.__jagxShowError("Mount error", (err && err.stack) || String(err));
+  }
+})();
+</script>`;
+}
+
 /**
  * Assemble a single runnable HTML document from a multi-file project so it
  * can be dropped straight into a sandboxed iframe — no bundler, no backend.
@@ -885,14 +982,25 @@ window.db = (function () {
  * - Otherwise, fall back to concatenating any plain .css/.js files under a
  *   minimal HTML shell.
  */
+function orderReactFiles(reactFiles: GeneratedFile[]): GeneratedFile[] {
+  const entry =
+    reactFiles.find((f) => /(^|\/)(app|main|index)\.(t|j)sx$/i.test(f.path)) ??
+    reactFiles[reactFiles.length - 1];
+  const others = reactFiles.filter((f) => f !== entry);
+  return [...others, entry];
+}
+
 export function buildPreviewDocument(files: GeneratedFile[]): string | null {
   if (files.length === 0) return null;
 
   const byPath = new Map(files.map((f) => [f.path.replace(/^\.?\//, ""), f]));
   const indexHtml = byPath.get("index.html") ?? files.find((f) => /index\.html$/i.test(f.path));
+  const runtimeHead = `${ERROR_OVERLAY_SCRIPT}${DB_RUNTIME_SCRIPT}`;
 
   if (indexHtml) {
     let html = indexHtml.content;
+    const referenced: GeneratedFile[] = [];
+
     html = html.replace(
       /<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["'][^>]*>/gi,
       (whole, href) => {
@@ -900,43 +1008,41 @@ export function buildPreviewDocument(files: GeneratedFile[]): string | null {
         return file ? `<style>\n${file.content}\n</style>` : whole;
       },
     );
-    html = html.replace(
-      /<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi,
-      (whole, src) => {
-        const file = byPath.get(src.replace(/^\.?\//, ""));
-        if (!file) return whole;
-        const isModule = REACT_EXT.test(file.path) || /type=["']module["']/i.test(whole);
-        return `<script type="${isModule ? "text/babel" : "text/javascript"}" data-type="module">\n${file.content}\n</script>`;
-      },
-    );
-    if (files.some((f) => REACT_EXT.test(f.path)) && !/babel/i.test(html)) {
-      html = html.replace(
-        "</head>",
-        `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script></head>`,
-      );
+    html = html.replace(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi, (whole, src) => {
+      const file = byPath.get(src.replace(/^\.?\//, ""));
+      if (!file) return whole; // leave external/CDN scripts alone
+      if (REACT_EXT.test(file.path)) {
+        referenced.push(file);
+        return ""; // folded into the single bootstrap script below instead
+      }
+      return `<script>\n${file.content}\n</script>`;
+    });
+
+    // Mount any React files even if the model forgot to <script src> them.
+    const allReact = files.filter((f) => REACT_EXT.test(f.path));
+    const unreferenced = allReact.filter((f) => !referenced.includes(f));
+    const reactFiles = orderReactFiles([...referenced, ...unreferenced]);
+
+    let tail = "";
+    if (reactFiles.length > 0) {
+      tail =
+        `<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>` +
+        `<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>` +
+        `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>` +
+        REACT_GLOBALS_SCRIPT +
+        reactBootstrapScript(reactFiles);
     }
-    if (/<head>/i.test(html)) {
-      html = html.replace("<head>", `<head>${DB_RUNTIME_SCRIPT}`);
-    } else {
-      html = DB_RUNTIME_SCRIPT + html;
-    }
+
+    html = /<head[^>]*>/i.test(html)
+      ? html.replace(/<head[^>]*>/i, (m) => `${m}${runtimeHead}`)
+      : runtimeHead + html;
+    html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${tail}</body>`) : html + tail;
     return html;
   }
 
-  const reactFiles = files.filter((f) => REACT_EXT.test(f.path));
+  const reactFiles = orderReactFiles(files.filter((f) => REACT_EXT.test(f.path)));
   if (reactFiles.length > 0) {
     const cssFiles = files.filter((f) => CSS_EXT.test(f.path));
-    const entry =
-      reactFiles.find((f) => /(^|\/)(app|main|index)\.(t|j)sx$/i.test(f.path)) ?? reactFiles[0];
-    const others = reactFiles.filter((f) => f.path !== entry.path);
-
-    const modules = [...others, entry]
-      .map(
-        (f) =>
-          `<script type="text/babel" data-presets="typescript,react" data-filename="${f.path}">\n${f.content}\n</script>`,
-      )
-      .join("\n");
-
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -946,7 +1052,8 @@ export function buildPreviewDocument(files: GeneratedFile[]): string | null {
 <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-${DB_RUNTIME_SCRIPT}
+${runtimeHead}
+${REACT_GLOBALS_SCRIPT}
 <style>
   html,body,#root{height:100%;margin:0;}
   body{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;}
@@ -955,16 +1062,7 @@ ${DB_RUNTIME_SCRIPT}
 </head>
 <body>
 <div id="root"></div>
-${modules}
-<script type="text/babel" data-presets="typescript,react">
-try {
-  const root = ReactDOM.createRoot(document.getElementById('root'));
-  const Entry = typeof App !== 'undefined' ? App : (typeof Main !== 'undefined' ? Main : null);
-  if (Entry) root.render(<Entry />);
-} catch (e) {
-  document.getElementById('root').innerHTML = '<pre style="color:#dc2626;padding:16px;white-space:pre-wrap">' + (e && e.message ? e.message : e) + '</pre>';
-}
-</script>
+${reactBootstrapScript(reactFiles)}
 </body>
 </html>`;
   }
@@ -973,10 +1071,16 @@ try {
   const jsFiles = files.filter((f) => /\.js$/i.test(f.path));
   if (cssFiles.length || jsFiles.length) {
     return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8" />${DB_RUNTIME_SCRIPT}<style>${cssFiles.map((f) => f.content).join("\n")}</style></head>
+<html><head><meta charset="UTF-8" />${runtimeHead}<style>${cssFiles.map((f) => f.content).join("\n")}</style></head>
 <body>
 <div id="app"></div>
-<script>${jsFiles.map((f) => f.content).join("\n;\n")}</script>
+<script>
+try {
+${jsFiles.map((f) => f.content).join("\n;\n")}
+} catch (err) {
+  window.__jagxShowError("Runtime error", (err && err.stack) || String(err));
+}
+</script>
 </body></html>`;
   }
 

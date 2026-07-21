@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowUp,
   Check,
@@ -374,6 +375,35 @@ function ChatPage() {
     [files, activeFile],
   );
 
+  const [previewError, setPreviewError] = useState<{ title: string; detail: string } | null>(null);
+
+  useEffect(() => {
+    setPreviewError(null);
+  }, [previewSignature]);
+
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      const data = e.data;
+      if (data && data.source === "jagx-preview" && data.type === "error") {
+        setPreviewError({ title: data.title || "Preview error", detail: data.detail || "" });
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  function askToFixPreviewError() {
+    if (!previewError || streaming) return;
+    const text = `The preview is showing this error — please fix it:\n\n${previewError.title}${
+      previewError.detail ? `\n${previewError.detail}` : ""
+    }`;
+    const userMsg: ChatMessage = { id: uid(), role: "user", content: text, createdAt: Date.now() };
+    const next = [...messages, userMsg];
+    persistMessages(next);
+    setPreviewError(null);
+    runAssistant(next, skills, settings);
+  }
+
   // Live status derived from the in-flight stream, for the "building" card.
   const livePlan = useMemo(() => (streaming ? extractPlan(streamText) : []), [streaming, streamText]);
   const liveFiles = useMemo(
@@ -607,6 +637,27 @@ function ChatPage() {
             {files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "No output yet"}
           </span>
         </div>
+
+        {previewError && tab === "preview" && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5 flex-none" />
+            <span className="flex-1 truncate">{previewError.title}</span>
+            <button
+              onClick={askToFixPreviewError}
+              disabled={streaming}
+              className="inline-flex items-center gap-1 rounded-md bg-destructive px-2 py-1 font-semibold text-destructive-foreground disabled:opacity-50"
+            >
+              Ask JagX to fix it
+            </button>
+            <button
+              onClick={() => setPreviewError(null)}
+              className="text-destructive/70 hover:text-destructive"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-hidden">
           {files.length === 0 ? (
