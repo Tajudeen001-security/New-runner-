@@ -983,6 +983,7 @@ function reactBootstrapScript(files: GeneratedFile[]): string {
  *   minimal HTML shell.
  */
 function orderReactFiles(reactFiles: GeneratedFile[]): GeneratedFile[] {
+  if (reactFiles.length === 0) return [];
   const entry =
     reactFiles.find((f) => /(^|\/)(app|main|index)\.(t|j)sx$/i.test(f.path)) ??
     reactFiles[reactFiles.length - 1];

@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -45,8 +45,65 @@ import {
 } from "../lib/skills";
 
 export const Route = createFileRoute("/chat/$projectId")({
-  component: ChatPage,
+  component: () => (
+    <ChatErrorBoundary>
+      <ChatPage />
+    </ChatErrorBoundary>
+  ),
 });
+
+/** Last line of defense: if anything in this page throws during render
+ * (a bad file, a parsing edge case we didn't anticipate), show a
+ * recoverable message here instead of taking down the whole app. Nothing
+ * is lost — chats and files are persisted to localStorage as they happen,
+ * so "Try again" just re-mounts against that same data. */
+class ChatErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: { componentStack?: string }) {
+    console.error("Chat page crashed:", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-[calc(100vh-3.5rem)] flex-col items-center justify-center gap-4 px-6 text-center">
+          <AlertTriangle className="h-8 w-8 text-destructive" />
+          <div>
+            <h1 className="text-lg font-semibold">This chat hit a snag</h1>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+              Something broke the page itself, not just the preview. Your chat and files are saved —
+              try again to pick back up right where you left off.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => this.setState({ error: null })}
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:border-gold/60"
+            >
+              Try again
+            </button>
+            <Link
+              to="/"
+              className="rounded-md bg-gold-gradient px-4 py-2 text-sm font-semibold text-primary-foreground shadow-gold"
+            >
+              Go home
+            </Link>
+          </div>
+          <pre className="mt-2 max-w-lg overflow-auto rounded-md border border-border/60 bg-card/50 p-3 text-left text-[11px] text-muted-foreground">
+            {String(this.state.error.message || this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 
 type Attachment = {
   id: string;
@@ -365,7 +422,14 @@ function ChatPage() {
 
   const activeSkills = useMemo(() => skills.filter((s) => s.installed), [skills]);
 
-  const previewDoc = useMemo(() => buildPreviewDocument(files), [files]);
+  const previewDoc = useMemo(() => {
+    try {
+      return buildPreviewDocument(files);
+    } catch (err: any) {
+      console.error("buildPreviewDocument failed", err);
+      return null;
+    }
+  }, [files]);
   const previewSignature = useMemo(
     () => files.map((f) => `${f.path}:${f.content.length}`).join("|"),
     [files],
