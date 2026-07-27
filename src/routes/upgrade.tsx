@@ -28,6 +28,8 @@ function UpgradePage() {
   );
   const [errorMsg, setErrorMsg] = useState("");
   const [isPro, setIsPro] = useState(false);
+  const [licenseCode, setLicenseCode] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
 
   useEffect(() => {
     const sessionId = new URLSearchParams(window.location.search).get("session_id");
@@ -66,6 +68,37 @@ function UpgradePage() {
     } catch (err: any) {
       setStatus("idle");
       toast.error(err.message || "Couldn't start checkout — payments may not be configured yet.");
+    }
+  }
+
+  async function redeemCode() {
+    const code = licenseCode.trim();
+    if (!code) return;
+    setRedeeming(true);
+    try {
+      const res = await fetch("/api/redeem-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        toast.error(text || "Couldn't redeem that code");
+        return;
+      }
+      const data = JSON.parse(text);
+      if (data.pro && data.token) {
+        saveLicenseToken(data.token);
+        setIsPro(true);
+        setLicenseCode("");
+        toast.success("Code redeemed — you're Pro on this device!");
+      } else {
+        toast.error("That code didn't work");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Couldn't reach the server");
+    } finally {
+      setRedeeming(false);
     }
   }
 
@@ -172,6 +205,31 @@ function UpgradePage() {
           )}
         </div>
       </div>
+
+      {!isPro && (
+        <div className="mx-auto mt-10 max-w-md rounded-xl border border-border/60 bg-card/40 p-5 text-center">
+          <p className="text-sm font-medium">Paid another way (bank transfer, etc.)?</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Enter the license code you were given to activate Pro on this device.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input
+              value={licenseCode}
+              onChange={(e) => setLicenseCode(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && redeemCode()}
+              placeholder="jagX-XXXXX-XXXXX-JRILICENSE-XXXXX"
+              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-xs font-mono outline-none focus:border-gold/60"
+            />
+            <button
+              onClick={redeemCode}
+              disabled={redeeming || !licenseCode.trim()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-gold/50 px-3 py-2 text-xs font-semibold text-gold hover:bg-gold/10 disabled:opacity-50"
+            >
+              {redeeming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Redeem"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <p className="mx-auto mt-8 max-w-lg text-center text-xs text-muted-foreground">
         Pro status is tied to this browser/device (no account system yet), verified against your
