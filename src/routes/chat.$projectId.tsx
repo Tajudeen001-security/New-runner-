@@ -32,7 +32,15 @@ import {
   type Settings,
   type Skill,
 } from "../lib/storage";
-import { modelLabel, nvidiaChat } from "../lib/nvidia";
+import {
+  modelLabel,
+  nvidiaChat,
+  isModelLocked,
+  FREE_MAX_TOKENS,
+  PRO_MAX_TOKENS,
+  FREE_MAX_ACTIVE_SKILLS,
+} from "../lib/nvidia";
+import { checkPro } from "../lib/license";
 import {
   buildSystemPrompt,
   buildPreviewDocument,
@@ -151,6 +159,7 @@ function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [isPro, setIsPro] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [reasoningText, setReasoningText] = useState("");
@@ -183,6 +192,7 @@ function ChatPage() {
     setFiles(savedFiles);
     setActiveFile(savedFiles[0]?.path ?? null);
     setHydrated(true);
+    checkPro().then(setIsPro);
 
     // Autorun if the seed message was queued from home
     const pending = raw.some((m) => m && m.__pending);
@@ -221,6 +231,33 @@ function ChatPage() {
       navigate({ to: "/settings" });
       return;
     }
+
+    const proNow = await checkPro();
+    setIsPro(proNow);
+
+    let model = s.model;
+    if (isModelLocked(model, proNow)) {
+      toast("That model needs Pro — using a free model instead this time.", {
+        action: { label: "Upgrade", onClick: () => navigate({ to: "/upgrade" }) },
+      });
+      model = DEFAULT_SETTINGS.model;
+    }
+    const maxTokens = Math.min(s.maxTokens, proNow ? PRO_MAX_TOKENS : FREE_MAX_TOKENS);
+
+    let effectiveSkills = skillList;
+    if (!proNow) {
+      const active = skillList.filter((sk) => sk.installed);
+      if (active.length > FREE_MAX_ACTIVE_SKILLS) {
+        const keepIds = new Set(active.slice(0, FREE_MAX_ACTIVE_SKILLS).map((sk) => sk.id));
+        effectiveSkills = skillList.map((sk) =>
+          sk.installed && !keepIds.has(sk.id) ? { ...sk, installed: false } : sk,
+        );
+        toast(`Free plan uses your first ${FREE_MAX_ACTIVE_SKILLS} active skills this turn.`, {
+          action: { label: "Upgrade", onClick: () => navigate({ to: "/upgrade" }) },
+        });
+      }
+    }
+
     setStreaming(true);
     setStreamText("");
     setReasoningText("");
@@ -232,7 +269,7 @@ function ChatPage() {
     const envVarKeys = lsGet<{ key: string }[]>(K.envVars(projectId), [])
       .map((v) => v.key)
       .filter(Boolean);
-    const systemPrompt = buildSystemPrompt(skillList, {
+    const systemPrompt = buildSystemPrompt(effectiveSkills, {
       askBeforeBuilding: s.askBeforeBuilding,
       envVarKeys,
     });
@@ -247,10 +284,10 @@ function ChatPage() {
       let acc = "";
       const full = await nvidiaChat({
         apiKey: s.nvidiaApiKey,
-        model: s.model,
+        model,
         messages: apiMessages,
         temperature: s.temperature,
-        maxTokens: s.maxTokens,
+        maxTokens,
         signal: ac.signal,
         onReasoning: (chunk) => setReasoningText((r) => r + chunk),
         onToken: (chunk) => {

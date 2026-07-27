@@ -720,8 +720,41 @@ Once you have enough to build, always answer in this order:
    ...
    \`\`\`
    Use real, sensible file paths (src/, components/, api/, etc). Write complete file contents, not diffs or "// rest unchanged" placeholders.
+   CRITICAL: if a file references another one — an \`index.html\` with \`<link href="styles.css">\` or \`<script src="app.js">\`, a component importing another component — that referenced file MUST also appear as its own fenced block in this same response, at the exact same path. A dangling reference to a file you never actually wrote is the single most common way this preview ends up blank; if you mention a path anywhere, it has to exist.
 3. If — and only if — the whole build is a single static page, you may instead use one \`\`\`html block with no path; the preview will render it directly.
 4. After the files, add a short "### Done" note: one or two sentences on what you built, plus a "### Environment Variables" list if the build needs any (see below). Skip both for tiny tweaks.
+
+Worked example for a small plain HTML/CSS/JS site — notice all three files referenced in index.html are actually written out:
+
+### Plan
+- Single landing page with a hero, a features grid, and a contact form
+- Plain HTML/CSS/JS, no framework needed for something this simple
+
+\`\`\`html index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Example</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="root"></div>
+  <script src="app.js"></script>
+</body>
+</html>
+\`\`\`
+
+\`\`\`css styles.css
+body { margin: 0; font-family: sans-serif; }
+\`\`\`
+
+\`\`\`js app.js
+document.getElementById("root").textContent = "Hello!";
+\`\`\`
+
+### Done
+Built a minimal landing page with linked CSS and JS.
 
 Runtime constraints — this workspace has NO bundler, NO npm install, and NO Node server. Files are executed directly in the browser:
 - React/TSX/JSX files run as in-browser Babel-transpiled scripts, NOT ES modules. NEVER use \`import\`/\`export\` in these files (including \`import { createRoot } from "react-dom/client"\`, \`export default function App()\`, etc.) — a single leftover import/export line makes the ENTIRE file fail to run and the preview goes blank with nothing rendered. Instead, define components as plain global functions/consts (e.g. \`function App() { ... }\`, \`function TodoItem({ item }) { ... }\`). React and ReactDOM are already loaded globally.
@@ -1001,17 +1034,28 @@ export function buildPreviewDocument(files: GeneratedFile[]): string | null {
   if (indexHtml) {
     let html = indexHtml.content;
     const referenced: GeneratedFile[] = [];
+    const missing: string[] = [];
+    const isExternal = (href: string) => /^(https?:)?\/\//i.test(href) || href.startsWith("data:");
 
     html = html.replace(
       /<link[^>]+rel=["']stylesheet["'][^>]+href=["']([^"']+)["'][^>]*>/gi,
       (whole, href) => {
-        const file = byPath.get(href.replace(/^\.?\//, ""));
-        return file ? `<style>\n${file.content}\n</style>` : whole;
+        if (isExternal(href)) return whole; // real CDN link, leave alone
+        const clean = href.replace(/^\.?\//, "");
+        const file = byPath.get(clean);
+        if (file) return `<style>\n${file.content}\n</style>`;
+        missing.push(clean);
+        return `<!-- missing stylesheet: ${clean} -->`;
       },
     );
     html = html.replace(/<script[^>]+src=["']([^"']+)["'][^>]*><\/script>/gi, (whole, src) => {
-      const file = byPath.get(src.replace(/^\.?\//, ""));
-      if (!file) return whole; // leave external/CDN scripts alone
+      if (isExternal(src)) return whole; // real CDN script, leave alone
+      const clean = src.replace(/^\.?\//, "");
+      const file = byPath.get(clean);
+      if (!file) {
+        missing.push(clean);
+        return `<!-- missing script: ${clean} -->`;
+      }
       if (REACT_EXT.test(file.path)) {
         referenced.push(file);
         return ""; // folded into the single bootstrap script below instead
@@ -1032,6 +1076,17 @@ export function buildPreviewDocument(files: GeneratedFile[]): string | null {
         `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>` +
         REACT_GLOBALS_SCRIPT +
         reactBootstrapScript(reactFiles);
+    }
+
+    if (missing.length > 0) {
+      const unique = Array.from(new Set(missing));
+      const title = unique.length > 1 ? "Missing files" : "Missing file";
+      const detail =
+        `index.html references ${unique.join(", ")}, but ${
+          unique.length > 1 ? "they were" : "it was"
+        } never generated in this response — that's why the preview is blank or broken. ` +
+        `Tap "Ask JagX to fix it" below, or just ask directly for the missing file(s).`;
+      tail += `<script>window.__jagxShowError(${JSON.stringify(title)}, ${JSON.stringify(detail)});</script>`;
     }
 
     html = /<head[^>]*>/i.test(html)

@@ -7,12 +7,13 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import logo from "../assets/jagx-logo.png";
+import { checkPro } from "../lib/license";
 
 function NotFoundComponent() {
   return (
@@ -153,6 +154,11 @@ function RootComponent() {
 }
 
 function TopNav() {
+  const [isPro, setIsPro] = useState(false);
+  useEffect(() => {
+    checkPro().then(setIsPro);
+  }, []);
+
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-2 px-3 sm:px-4">
@@ -194,6 +200,14 @@ function TopNav() {
           >
             Settings
           </Link>
+          {!isPro && (
+            <Link
+              to="/upgrade"
+              className="ml-0.5 rounded-md bg-gold-gradient px-2 py-1.5 font-semibold text-primary-foreground shadow-gold sm:px-3"
+            >
+              Upgrade
+            </Link>
+          )}
         </nav>
       </div>
     </header>

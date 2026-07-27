@@ -13,7 +13,9 @@ import {
   type Project,
   type EnvVar,
 } from "../lib/storage";
-import { NVIDIA_MODELS } from "../lib/nvidia";
+import { NVIDIA_MODELS, FREE_MAX_TOKENS, PRO_MAX_TOKENS, FREE_MAX_ACTIVE_SKILLS } from "../lib/nvidia";
+import { checkPro } from "../lib/license";
+import { Link } from "@tanstack/react-router";
 import {
   applyBackup,
   buildRestorePreview,
@@ -48,10 +50,12 @@ function SettingsPage() {
     fileName: string;
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [isPro, setIsPro] = useState(false);
 
   useEffect(() => {
     setSettings(getSettings());
     setHydrated(true);
+    checkPro().then(setIsPro);
   }, []);
 
   function update<Field extends keyof Settings>(field: Field, value: Settings[Field]) {
@@ -119,6 +123,30 @@ function SettingsPage() {
       </p>
 
       <div className="mt-12 space-y-12">
+        {/* Plan */}
+        <Row
+          label="00"
+          title="Plan"
+          subtitle={
+            isPro
+              ? "You're on Pro on this device — flagship models and the full token limit are unlocked."
+              : "Free plan — upgrade for flagship models and bigger builds."
+          }
+        >
+          {isPro ? (
+            <div className="inline-flex items-center gap-2 rounded-md border border-gold/40 bg-gold/10 px-3 py-2 text-sm font-semibold text-gold">
+              <Check className="h-4 w-4" /> Pro active
+            </div>
+          ) : (
+            <Link
+              to="/upgrade"
+              className="inline-flex items-center gap-2 rounded-md bg-gold-gradient px-4 py-2 text-sm font-semibold text-primary-foreground shadow-gold"
+            >
+              Upgrade to Pro — $19/mo
+            </Link>
+          )}
+        </Row>
+
         {/* API key */}
         <Row
           label="01"
@@ -165,11 +193,22 @@ function SettingsPage() {
           <div className="divide-y divide-border/60 border-y border-border/60">
             {NVIDIA_MODELS.map((m) => {
               const active = settings.model === m.id;
+              const locked = m.tier === "pro" && !isPro;
               return (
                 <button
                   key={m.id}
-                  onClick={() => update("model", m.id)}
-                  className="flex w-full items-center gap-4 py-3 text-left transition-colors hover:bg-accent/40"
+                  onClick={() => {
+                    if (locked) {
+                      toast("Pro model — upgrade to unlock it", {
+                        action: { label: "Upgrade", onClick: () => (window.location.href = "/upgrade") },
+                      });
+                      return;
+                    }
+                    update("model", m.id);
+                  }}
+                  className={`flex w-full items-center gap-4 py-3 text-left transition-colors ${
+                    locked ? "opacity-60" : "hover:bg-accent/40"
+                  }`}
                 >
                   <span
                     className={`inline-flex h-4 w-4 flex-none items-center justify-center rounded-full border ${
@@ -187,6 +226,11 @@ function SettingsPage() {
                       {m.badge && (
                         <span className="rounded-full bg-gold/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-gold">
                           {m.badge}
+                        </span>
+                      )}
+                      {locked && (
+                        <span className="rounded-full border border-gold/50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-gold">
+                          Pro
                         </span>
                       )}
                       <span className="text-[10px] font-normal normal-case tracking-normal text-muted-foreground/70">
@@ -250,7 +294,11 @@ function SettingsPage() {
         <Row
           label="04"
           title="Response length"
-          subtitle="Higher lets JagX write bigger multi-file apps in one turn without cutting off mid-file."
+          subtitle={
+            isPro
+              ? "Higher lets JagX write bigger multi-file apps in one turn without cutting off mid-file."
+              : `Free plan is capped at ${FREE_MAX_TOKENS.toLocaleString()} tokens. Upgrade for up to ${PRO_MAX_TOKENS.toLocaleString()}.`
+          }
           aside={
             <span className="font-mono text-sm text-gold tabular-nums">
               {settings.maxTokens.toLocaleString()}
@@ -260,12 +308,17 @@ function SettingsPage() {
           <input
             type="range"
             min={2000}
-            max={32000}
+            max={isPro ? PRO_MAX_TOKENS : FREE_MAX_TOKENS}
             step={1000}
-            value={settings.maxTokens}
+            value={Math.min(settings.maxTokens, isPro ? PRO_MAX_TOKENS : FREE_MAX_TOKENS)}
             onChange={(e) => update("maxTokens", parseInt(e.target.value, 10))}
             className="w-full accent-[color:var(--gold)]"
           />
+          {!isPro && (
+            <Link to="/upgrade" className="mt-2 inline-block text-xs font-medium text-gold hover:underline">
+              Upgrade to unlock {PRO_MAX_TOKENS.toLocaleString()} tokens →
+            </Link>
+          )}
           <div className="mt-1 flex justify-between text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
             <span>Fast &amp; short</span>
             <span>Large builds</span>

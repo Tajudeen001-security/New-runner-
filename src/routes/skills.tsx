@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { Check, Github, Loader2, Package, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { K, lsGet, lsSet, uid, DEFAULT_SETTINGS, getSettings, type Settings, type Skill } from "../lib/storage";
 import { BUILTIN_SKILLS } from "../lib/skills";
-import { nvidiaChat } from "../lib/nvidia";
+import { nvidiaChat, FREE_MAX_ACTIVE_SKILLS } from "../lib/nvidia";
+import { checkPro } from "../lib/license";
 
 export const Route = createFileRoute("/skills")({
   component: SkillsPage,
@@ -25,6 +26,7 @@ function SkillsPage() {
   const [hydrated, setHydrated] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showGithub, setShowGithub] = useState(false);
+  const [isPro, setIsPro] = useState(false);
 
   useEffect(() => {
     // Merge stored skills with built-ins (in case new built-ins were added)
@@ -38,6 +40,7 @@ function SkillsPage() {
     setSkills(final);
     lsSet(K.skills, final);
     setHydrated(true);
+    checkPro().then(setIsPro);
   }, []);
 
   function persist(next: Skill[]) {
@@ -46,6 +49,14 @@ function SkillsPage() {
   }
 
   function toggle(id: string) {
+    const current = skills.find((s) => s.id === id);
+    const activeCount = skills.filter((s) => s.installed).length;
+    if (current && !current.installed && !isPro && activeCount >= FREE_MAX_ACTIVE_SKILLS) {
+      toast(`Free plan allows ${FREE_MAX_ACTIVE_SKILLS} active skills at a time.`, {
+        action: { label: "Upgrade", onClick: () => (window.location.href = "/upgrade") },
+      });
+      return;
+    }
     const next = skills.map((s) =>
       s.id === id ? { ...s, installed: !s.installed } : s,
     );

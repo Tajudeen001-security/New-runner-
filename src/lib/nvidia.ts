@@ -14,6 +14,8 @@ export type NvidiaModel = {
   badge?: string;
   /** Approximate context window, shown as a hint in Settings. */
   context?: string;
+  /** Pro-only models are locked behind /upgrade for free-tier users. */
+  tier?: "pro";
 };
 
 // NVIDIA's model catalog on build.nvidia.com changes over time — slugs get
@@ -28,6 +30,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "NVIDIA's flagship — hybrid Mamba-Transformer MoE for the hardest builds",
     family: "NVIDIA",
     speed: "deep",
+    tier: "pro",
     badge: "Flagship",
     context: "1M tokens",
   },
@@ -95,6 +98,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Previous-gen NVIDIA flagship reasoning model",
     family: "NVIDIA",
     speed: "deep",
+    tier: "pro",
     context: "128K tokens",
   },
   {
@@ -119,6 +123,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Large chat model, strong for synthetic data and structured text",
     family: "NVIDIA",
     speed: "deep",
+    tier: "pro",
     context: "4K tokens",
   },
   // --- Coding specialists ---
@@ -128,6 +133,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Large coding specialist, built for multi-file work",
     family: "Qwen",
     speed: "deep",
+    tier: "pro",
     context: "256K tokens",
   },
   {
@@ -168,6 +174,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Explicit chain-of-thought — good for tricky logic and math-heavy code",
     family: "Qwen",
     speed: "deep",
+    tier: "pro",
     context: "32K tokens",
   },
   // --- Reasoning / general MoE ---
@@ -185,6 +192,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Multimodal MoE with strong reasoning, coding, and tool-calling",
     family: "MiniMax",
     speed: "deep",
+    tier: "pro",
     context: "1M tokens",
   },
   {
@@ -193,6 +201,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Open-weight general model, solid all-rounder for chat and code",
     family: "OpenAI (open)",
     speed: "deep",
+    tier: "pro",
     context: "128K tokens",
   },
   // --- General purpose ---
@@ -210,6 +219,7 @@ export const NVIDIA_MODELS: NvidiaModel[] = [
     hint: "Meta's largest — deep reasoning for hard, high-stakes tasks",
     family: "Meta",
     speed: "deep",
+    tier: "pro",
     context: "128K tokens",
   },
   {
@@ -277,6 +287,15 @@ export function modelLabel(modelId: string) {
 export function modelById(modelId: string) {
   return NVIDIA_MODELS.find((m) => m.id === modelId);
 }
+
+export function isModelLocked(modelId: string, isPro: boolean): boolean {
+  if (isPro) return false;
+  return modelById(modelId)?.tier === "pro";
+}
+
+export const FREE_MAX_TOKENS = 8000;
+export const PRO_MAX_TOKENS = 32000;
+export const FREE_MAX_ACTIVE_SKILLS = 3;
 
 export function modelSpeed(modelId: string): ModelSpeed {
   return NVIDIA_MODELS.find((m) => m.id === modelId)?.speed ?? "balanced";
