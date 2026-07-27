@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Code2,
   Copy,
+  Download,
   Eye,
   FileCode2,
   Image as ImageIcon,
@@ -31,6 +32,8 @@ import {
   type Project,
   type Settings,
   type Skill,
+  type BackendConfig,
+  DEFAULT_BACKEND_CONFIG,
 } from "../lib/storage";
 import {
   modelLabel,
@@ -167,6 +170,8 @@ function ChatPage() {
   const [mobileView, setMobileView] = useState<"chat" | "output">("chat");
   const [files, setFiles] = useState<GeneratedFile[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [downloadingZip, setDownloadingZip] = useState(false);
+  const [backendConfig, setBackendConfig] = useState<BackendConfig>(DEFAULT_BACKEND_CONFIG);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -193,6 +198,7 @@ function ChatPage() {
     setActiveFile(savedFiles[0]?.path ?? null);
     setHydrated(true);
     checkPro().then(setIsPro);
+    setBackendConfig(lsGet<BackendConfig>(K.backend(projectId), DEFAULT_BACKEND_CONFIG));
 
     // Autorun if the seed message was queued from home
     const pending = raw.some((m) => m && m.__pending);
@@ -272,6 +278,7 @@ function ChatPage() {
     const systemPrompt = buildSystemPrompt(effectiveSkills, {
       askBeforeBuilding: s.askBeforeBuilding,
       envVarKeys,
+      backendBaseUrl: backendConfig.baseUrl || undefined,
     });
     const apiMessages = [
       { role: "system" as const, content: systemPrompt },
@@ -410,6 +417,38 @@ function ChatPage() {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
+  async function downloadProjectZip() {
+    if (files.length === 0) return;
+    setDownloadingZip(true);
+    try {
+      const fflate = await import(/* @vite-ignore */ "https://esm.sh/fflate@0.8.2");
+      const encoder = new TextEncoder();
+      const zipInput: Record<string, Uint8Array> = {};
+      for (const f of files) {
+        zipInput[f.path] = encoder.encode(f.content);
+      }
+      const zipped: Uint8Array = await new Promise((resolve, reject) => {
+        fflate.zip(zipInput, { level: 6 }, (err: any, data: Uint8Array) =>
+          err ? reject(err) : resolve(data),
+        );
+      });
+      const blob = new Blob([zipped], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(project?.name || "jagx-project").replace(/[^a-z0-9-_]+/gi, "-")}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast.success(`Downloaded ${files.length} file${files.length === 1 ? "" : "s"}`);
+    } catch (err: any) {
+      toast.error(err?.message || "Couldn't build the zip");
+    } finally {
+      setDownloadingZip(false);
+    }
+  }
+
   function send() {
     const text = input.trim();
     if (!text && attachments.length === 0) return;
@@ -461,12 +500,12 @@ function ChatPage() {
 
   const previewDoc = useMemo(() => {
     try {
-      return buildPreviewDocument(files);
+      return buildPreviewDocument(files, backendConfig.baseUrl ? backendConfig : undefined);
     } catch (err: any) {
       console.error("buildPreviewDocument failed", err);
       return null;
     }
-  }, [files]);
+  }, [files, backendConfig]);
   const previewSignature = useMemo(
     () => files.map((f) => `${f.path}:${f.content.length}`).join("|"),
     [files],
@@ -734,9 +773,26 @@ function ChatPage() {
               <Code2 className="h-3.5 w-3.5" /> Code
             </button>
           </div>
-          <span className="text-xs text-muted-foreground">
-            {files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "No output yet"}
-          </span>
+          <div className="flex items-center gap-2">
+            {files.length > 0 && (
+              <button
+                onClick={downloadProjectZip}
+                disabled={downloadingZip}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-gold/60 hover:text-foreground disabled:opacity-50"
+                title="Download every generated file as a .zip"
+              >
+                {downloadingZip ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                Download .zip
+              </button>
+            )}
+            <span className="text-xs text-muted-foreground">
+              {files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "No output yet"}
+            </span>
+          </div>
         </div>
 
         {previewError && tab === "preview" && (
@@ -902,7 +958,7 @@ function BuildingCard({
           </span>
         </div>
       )}
-      {done && <p className="whitespace-pre-wrap text-muted-foreground">{done}</p>}
+      {done && <div className="text-muted-foreground"><RichText text={done} /></div>}
     </div>
   );
 }
@@ -976,7 +1032,7 @@ function MessageBubble({
 
       {prose && <RichText text={prose} />}
 
-      {done && <p className="whitespace-pre-wrap text-muted-foreground">{done}</p>}
+      {done && <div className="text-muted-foreground"><RichText text={done} /></div>}
     </div>
   );
 }

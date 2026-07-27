@@ -96,6 +96,25 @@ export type EnvVar = {
   note?: string;
 };
 
+/** A real backend the user already has running elsewhere (their own
+ * server, Supabase project, Railway/Render deployment, etc.) that a
+ * project's generated frontend should call instead of the local mock db.
+ * The auth token, if set, is used directly from the browser — same as any
+ * client-side app calling an API — so only put a token here that's safe to
+ * be visible in the browser's network tab (a scoped/publishable key, not a
+ * master secret). */
+export type BackendConfig = {
+  baseUrl: string;
+  authHeaderName: string;
+  authToken: string;
+};
+
+export const DEFAULT_BACKEND_CONFIG: BackendConfig = {
+  baseUrl: "",
+  authHeaderName: "Authorization",
+  authToken: "",
+};
+
 export const K = {
   projects: "jagx:projects",
   messages: (projectId: string) => `jagx:messages:${projectId}`,
@@ -105,6 +124,8 @@ export const K = {
   files: (projectId: string) => `jagx:files:${projectId}`,
   /** Environment variable notes for a project (local-only, never sent anywhere). */
   envVars: (projectId: string) => `jagx:envvars:${projectId}`,
+  /** Real external backend connection for a project (see BackendConfig). */
+  backend: (projectId: string) => `jagx:backend:${projectId}`,
   skills: "jagx:skills",
   settings: "jagx:settings",
 };

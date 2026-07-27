@@ -12,6 +12,8 @@ import {
   type Settings,
   type Project,
   type EnvVar,
+  type BackendConfig,
+  DEFAULT_BACKEND_CONFIG,
 } from "../lib/storage";
 import { NVIDIA_MODELS, FREE_MAX_TOKENS, PRO_MAX_TOKENS, FREE_MAX_ACTIVE_SKILLS } from "../lib/nvidia";
 import { checkPro } from "../lib/license";
@@ -362,9 +364,18 @@ function SettingsPage() {
           <EnvVarsManager />
         </Row>
 
-        {/* Backup */}
+        {/* Backend connection */}
         <Row
           label="07"
+          title="Connect your backend"
+          subtitle="Point a project's generated frontend at a real backend you already have running (your own server, Supabase, Railway, Render...)."
+        >
+          <BackendConfigManager />
+        </Row>
+
+        {/* Backup */}
+        <Row
+          label="08"
           title="Backup & restore"
           subtitle="Everything — projects, chats, skills, settings — as a single JSON file."
         >
@@ -654,6 +665,110 @@ function EnvVarsManager() {
         Variables</span> (e.g. Vercel), and for local development put them in a{" "}
         <span className="font-mono">.env.local</span> file (already excluded by{" "}
         <span className="font-mono">.gitignore</span> — never commit real secrets to GitHub).
+      </p>
+    </div>
+  );
+}
+
+function BackendConfigManager() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [config, setConfig] = useState<BackendConfig>(DEFAULT_BACKEND_CONFIG);
+  const [showToken, setShowToken] = useState(false);
+
+  useEffect(() => {
+    const ps = lsGet<Project[]>(K.projects, []);
+    setProjects(ps);
+    if (ps[0]) setProjectId(ps[0].id);
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setConfig(lsGet<BackendConfig>(K.backend(projectId), DEFAULT_BACKEND_CONFIG));
+  }, [projectId]);
+
+  function persist(next: BackendConfig) {
+    setConfig(next);
+    if (projectId) lsSet(K.backend(projectId), next);
+  }
+
+  if (projects.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed border-border/60 bg-card/30 p-3 text-sm text-muted-foreground">
+        Create a project first — then connect its backend here.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <select
+        value={projectId}
+        onChange={(e) => setProjectId(e.target.value)}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-gold/60"
+      >
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+
+      <div className="space-y-2 rounded-lg border border-border/60 bg-card/50 p-3">
+        <label className="block text-xs text-muted-foreground">Base URL</label>
+        <input
+          value={config.baseUrl}
+          onChange={(e) => persist({ ...config, baseUrl: e.target.value })}
+          placeholder="https://api.yourbackend.com"
+          className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs outline-none focus:border-gold/60"
+        />
+
+        <div className="flex gap-2">
+          <div className="w-40 flex-none">
+            <label className="block text-xs text-muted-foreground">Header name</label>
+            <input
+              value={config.authHeaderName}
+              onChange={(e) => persist({ ...config, authHeaderName: e.target.value })}
+              placeholder="Authorization"
+              className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs outline-none focus:border-gold/60"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-muted-foreground">Token / API key</label>
+            <div className="mt-1 flex gap-1.5">
+              <input
+                type={showToken ? "text" : "password"}
+                value={config.authToken}
+                onChange={(e) => persist({ ...config, authToken: e.target.value })}
+                placeholder="Bearer eyJ... or your API key"
+                className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs outline-none focus:border-gold/60"
+              />
+              <button
+                onClick={() => setShowToken((s) => !s)}
+                className="rounded-md border border-border px-2 text-muted-foreground hover:text-foreground"
+              >
+                {showToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {config.baseUrl && (
+          <button
+            onClick={() => persist(DEFAULT_BACKEND_CONFIG)}
+            className="text-xs text-muted-foreground hover:text-destructive"
+          >
+            Disconnect this backend
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        When set, JagX writes real <span className="font-mono">fetch()</span> calls to this URL
+        instead of the local mock data for this project. The token is used directly from the
+        browser — visible in devtools, same as any client-side app — so use a scoped/publishable
+        key here, never a master secret. Nothing here is sent to the AI model, only the base URL is
+        (so it knows a real backend exists).
       </p>
     </div>
   );

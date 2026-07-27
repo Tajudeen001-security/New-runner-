@@ -794,7 +794,7 @@ Once you have enough to build, always answer in this order:
    Use real, sensible file paths (src/, components/, api/, etc). Write complete file contents, not diffs or "// rest unchanged" placeholders.
    CRITICAL: if a file references another one — an \`index.html\` with \`<link href="styles.css">\` or \`<script src="app.js">\`, a component importing another component — that referenced file MUST also appear as its own fenced block in this same response, at the exact same path. A dangling reference to a file you never actually wrote is the single most common way this preview ends up blank; if you mention a path anywhere, it has to exist.
 3. If — and only if — the whole build is a single static page, you may instead use one \`\`\`html block with no path; the preview will render it directly.
-4. After the files, add a short "### Done" note: one or two sentences on what you built, plus a "### Environment Variables" list if the build needs any (see below). Skip both for tiny tweaks.
+4. After the files, add a short "### Done" note: one or two sentences on what you built. Add a "### Environment Variables" list if the build needs any (see below). Add a "### Setup Commands" section — as a real \`\`\`bash fenced block — whenever the user would need to run actual terminal commands to get this working outside the preview (installing a real dependency that can't run in-browser, database migrations, a CLI tool's usage, deployment steps). Skip whichever of these don't apply, and skip all of it for tiny tweaks.
 
 Worked example for a small plain HTML/CSS/JS site — notice all three files referenced in index.html are actually written out:
 
@@ -857,6 +857,9 @@ export type SystemPromptOptions = {
   /** Env var KEY NAMES (never values) already tracked for this project, so
    * the agent knows what's configured and doesn't ask for or redefine them. */
   envVarKeys?: string[];
+  /** Base URL of a real backend the user has connected for this project
+   * (Settings → Connect your backend). Only the URL, never the auth token. */
+  backendBaseUrl?: string;
 };
 
 export function buildSystemPrompt(installedSkills: Skill[], options: SystemPromptOptions = {}): string {
@@ -871,6 +874,10 @@ export function buildSystemPrompt(installedSkills: Skill[], options: SystemPromp
 
   if (options.envVarKeys && options.envVarKeys.length > 0) {
     prompt += `\n\n---\n# Already configured for this project\nThese environment variable names are already tracked (values are not shared with you): ${options.envVarKeys.join(", ")}. Reference them by name in code via process.env; don't ask the user to re-provide them or invent new names for the same purpose.`;
+  }
+
+  if (options.backendBaseUrl) {
+    prompt += `\n\n---\n# Real backend connected for this project\nThe user has a real backend at ${options.backendBaseUrl} connected for this project. A global helper \`apiFetch(path, options)\` is available in the preview — it works exactly like \`fetch\`, but automatically prefixes \`path\` with the backend's base URL and attaches the configured auth header. Use \`apiFetch\` for real data operations in this project instead of the \`db\` mock helper (e.g. \`const res = await apiFetch("/todos"); const data = await res.json();\`). Handle loading/error states for real network calls — they can fail unlike the mock. Don't hardcode the base URL or any token in your code; \`apiFetch\` already carries them.`;
   }
 
   const active = installedSkills.filter((s) => s.installed);
@@ -1101,12 +1108,28 @@ function orderReactFiles(reactFiles: GeneratedFile[]): GeneratedFile[] {
   return [...others, entry];
 }
 
-export function buildPreviewDocument(files: GeneratedFile[]): string | null {
+export function buildPreviewDocument(
+  files: GeneratedFile[],
+  backend?: { baseUrl: string; authHeaderName: string; authToken: string },
+): string | null {
   if (files.length === 0) return null;
 
   const byPath = new Map(files.map((f) => [f.path.replace(/^\.?\//, ""), f]));
   const indexHtml = byPath.get("index.html") ?? files.find((f) => /index\.html$/i.test(f.path));
-  const runtimeHead = `${ERROR_OVERLAY_SCRIPT}${DB_RUNTIME_SCRIPT}`;
+  const backendScript =
+    backend && backend.baseUrl
+      ? `<script>
+window.API_BASE_URL = ${JSON.stringify(backend.baseUrl)};
+window.apiFetch = function (path, options) {
+  options = options || {};
+  var headers = Object.assign({}, options.headers || {});
+  ${backend.authToken ? `headers[${JSON.stringify(backend.authHeaderName || "Authorization")}] = ${JSON.stringify(backend.authToken)};` : ""}
+  var url = /^https?:\\/\\//i.test(path) ? path : (window.API_BASE_URL.replace(/\\/$/, "") + "/" + String(path).replace(/^\\//, ""));
+  return fetch(url, Object.assign({}, options, { headers: headers }));
+};
+</script>`
+      : "";
+  const runtimeHead = `${ERROR_OVERLAY_SCRIPT}${DB_RUNTIME_SCRIPT}${backendScript}`;
 
   if (indexHtml) {
     let html = indexHtml.content;
