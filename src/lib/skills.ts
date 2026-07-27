@@ -685,6 +685,78 @@ export const BUILTIN_SKILLS: Skill[] = [
     installed: false,
     createdAt: 0,
   },
+  {
+    id: "builtin-soc-dashboard",
+    name: "SOC / Threat Monitoring Dashboard",
+    description: "Live-feeling security event triage, alert severity, and timelines.",
+    instructions: "Build a Security Operations Center dashboard: an event feed (failed logins, firewall blocks, IDS/IPS alerts, malware detections) with severity (critical/high/medium/low), source, timestamp, and status; a triage workflow (new -> acknowledged -> investigating -> resolved/false-positive); filters by severity/source/date range/status; a summary bar (open critical count, mean time to acknowledge); and a detail panel per event showing raw log data and suggested next action. Seed realistic-looking mock events via the db helper so it feels alive in preview — never wire it to actually scan, probe, or monitor real infrastructure; this is a visualization and workflow tool over data that's already been collected elsewhere. Optionally tag events with MITRE ATT&CK technique IDs for context.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
+  {
+    id: "builtin-vuln-management",
+    name: "Vulnerability & Patch Management",
+    description: "CVE tracking, CVSS severity, remediation SLAs, and asset coverage.",
+    instructions: "Build a vulnerability management tracker: a list of findings (title, CVE ID if applicable, CVSS score/severity, affected asset(s), discovered date, status: open/in-progress/patched/risk-accepted/won't-fix), an SLA countdown derived from severity (e.g. critical = 7 days, high = 30, medium = 90), a dashboard summarizing open counts by severity and overdue remediations, and a detail view per finding with remediation notes and an audit trail of status changes. Store everything via the db helper. This tool tracks and prioritizes vulnerabilities that were already found by a scanner or pentest elsewhere — never build active scanning/exploitation logic, even a simulated one; keep it strictly a tracking and reporting surface.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
+  {
+    id: "builtin-incident-response",
+    name: "Incident Response Case Tracker",
+    description: "Case management for security incidents, following the standard response phases.",
+    instructions: "Build an incident case tracker structured around the standard response lifecycle (Detection & Analysis -> Containment -> Eradication -> Recovery -> Lessons Learned, per NIST SP 800-61 style). Each case needs: title, severity/priority, current phase, assigned responder, a timestamped activity/notes log (who did what, when), linked evidence references (filenames/descriptions, not actual file execution), and a checklist per phase that can be customized. Include a dashboard of open cases by phase and severity, and a post-incident report view summarizing timeline, root cause, and remediation actions once closed. Persist via the db helper.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
+  {
+    id: "builtin-security-awareness-training",
+    name: "Security Awareness Training Platform",
+    description: "Phishing-recognition quizzes, policy modules, and completion tracking — teaches people to spot attacks.",
+    instructions: "Build a security-awareness training platform: short modules (password hygiene, recognizing phishing, social engineering, safe browsing, data handling) each ending in a quiz; a phishing-recognition exercise that shows example emails/messages (as static content you write, clearly labeled as examples) and asks the learner to spot the red flags (mismatched sender domain, urgency language, suspicious links, spoofed branding) — this teaches detection, it does not send real messages or collect real credentials from anyone. Track per-learner progress and quiz scores via the db helper, show a completion dashboard for an admin view, and issue a simple completion certificate. Never build the inverse of this (an actual live phishing simulation that sends messages or harvests input from real recipients) — if asked for that, explain the distinction and offer this recognition-training version instead.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
+  {
+    id: "builtin-compliance-audit",
+    name: "Compliance & Audit Tracker",
+    description: "Control checklists, evidence tracking, and readiness scoring (ISO 27001/NDPR-style).",
+    instructions: "Build a compliance tracker: a library of controls grouped by framework/domain (access control, data protection, incident management, etc.), each with a status (not started/in progress/implemented/verified), an owner, a due date, and space for evidence notes/links. Show an overall readiness score (percentage of controls verified) per framework and a domain-by-domain breakdown. Support adding a custom framework's controls (useful for Nigeria's NDPR or a company's internal policy) as well as common ones. Persist via the db helper.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
+  {
+    id: "builtin-asset-inventory",
+    name: "Network & Asset Inventory",
+    description: "Asset visibility with risk scoring, ownership, and last-seen tracking.",
+    instructions: "Build an asset inventory dashboard: devices/systems with type, owner/department, IP or hostname, OS/software version, a risk score (derived from e.g. patch status, criticality, exposure), and last-seen timestamp. Include search/filter by risk level, department, or type, and a detail view per asset showing its history and linked vulnerabilities (if the vulnerability-tracker skill is also active, cross-reference by asset name). This displays inventory data that was already collected — never build code that actively scans a network, pings unknown hosts, or fingerprints real devices; seed realistic mock inventory via the db helper instead.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
+  {
+    id: "builtin-audit-log-viewer",
+    name: "Access & Audit Log Viewer",
+    description: "Searchable activity logs with anomaly highlighting.",
+    instructions: "Build a log viewer for access/audit events (login attempts, permission changes, data access, admin actions): a searchable, filterable table (by user, action type, date range, success/failure), and simple anomaly highlighting — flag things like repeated failed logins from one account, logins at unusual hours, or access from a new location, using straightforward rule-based checks on the mock data (not real ML). Include a per-user activity timeline view. Seed believable sample log data via the db helper.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
+  {
+    id: "builtin-secure-code-review",
+    name: "Secure Code Review (OWASP Top 10)",
+    description: "Systematic review and remediation against the OWASP Top 10.",
+    instructions: "When reviewing or writing code under this skill, systematically check for and fix: injection (SQL/command/XSS), broken authentication/session handling, sensitive data exposure (secrets in code, unencrypted storage), broken access control, security misconfiguration, insecure deserialization, using components with known vulnerabilities, insufficient logging/monitoring, and CSRF on state-changing requests. For each issue found, name it, explain the risk in one sentence, and show the fix — don't just say 'looks secure.' This is defensive review and remediation only: analyzing and hardening code the user owns, never producing a working exploit for a vulnerability as part of the review.",
+    builtin: true,
+    installed: false,
+    createdAt: 0,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -766,6 +838,11 @@ Building full-stack apps (the user wants something that works "for real", not ju
 - Design it like a real product: real data model, real validation, real empty/loading/error states. Wire all CRUD directly against the \`db\` helper (or component state for pure UI, never fake/hardcoded lists pretending to be live data) so it's genuinely interactive in preview today.
 - If the user's request implies a real backend/database/auth for production (not just the preview), ALSO write the real server-side files for their target host — e.g. Vercel serverless functions (\`api/todos.ts\` exporting \`export default async function handler(req, res) {...}\` for Node runtime, or \`export async function GET(request) {...}\` returning a \`Response\` for Edge runtime), a schema file, and a real DB client (e.g. \`@vercel/postgres\`, \`drizzle-orm\`, \`prisma\`, or a Supabase/PlanetScale/Neon client) reading connection info from \`process.env\`. These files won't run inside this browser preview (there's no server here) — say so plainly.
 - Whenever you introduce a real env var (DATABASE_URL, AUTH_SECRET, STRIPE_SECRET_KEY, any API key), end with a "### Environment Variables" section listing each \`KEY_NAME\` — what it's for, and whether it's server-only (never exposed to the browser) or safe to expose on the client (must be prefixed the way the target framework expects, e.g. \`VITE_\`/\`NEXT_PUBLIC_\`). Never invent a fake value — tell the user to get their own from the relevant provider and put it in Settings → Environment Variables here (tracked locally) plus their host's dashboard and a git-ignored \`.env.local\` for local dev. Never put real secrets in code you write.
+
+Building security/cybersecurity tools (dashboards, trackers, training platforms, and the like):
+- Build strong, real defensive tooling: SOC/threat dashboards, vulnerability and patch tracking, incident response case management, compliance/audit tracking, asset inventory, log/anomaly viewers, and security-awareness training that teaches people to recognize attacks. These are genuinely valuable and you should make them thorough and production-quality.
+- Do NOT build offensive/attack tooling regardless of the stated purpose (testing, research, a security company's internal use, red-teaming) — no exploit code, malware, port/vulnerability scanners that actively probe systems, credential-harvesting or spoofed login pages, or anything designed to gain unauthorized access. If asked, explain the distinction briefly and offer the defensive equivalent instead (e.g. a phishing-*recognition* quiz instead of a live phishing simulator).
+- Security dashboards should visualize and manage data that was already collected elsewhere (seed realistic mock data via the \`db\` helper) — never wire a "monitoring" tool to actually scan, ping, or fingerprint real infrastructure.
 
 Rules:
 - Be concise in prose. Do not narrate obvious steps. Let the plan and files speak.
