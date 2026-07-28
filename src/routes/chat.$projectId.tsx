@@ -6,17 +6,23 @@ import {
   ArrowLeft,
   ArrowUp,
   Check,
+  ChevronDown,
   ChevronRight,
   Code2,
   Copy,
   Download,
   Eye,
   FileCode2,
+  Folder,
+  History,
   Image as ImageIcon,
   Loader2,
+  MoreHorizontal,
   Paperclip,
   Play,
   RefreshCw,
+  Rocket,
+  Share2,
   Sparkles,
   Square,
   X,
@@ -34,6 +40,7 @@ import {
   type Skill,
   type BackendConfig,
   DEFAULT_BACKEND_CONFIG,
+  type ProjectVersion,
 } from "../lib/storage";
 import {
   modelLabel,
@@ -42,6 +49,7 @@ import {
   FREE_MAX_TOKENS,
   PRO_MAX_TOKENS,
   FREE_MAX_ACTIVE_SKILLS,
+  NVIDIA_MODELS,
 } from "../lib/nvidia";
 import { checkPro } from "../lib/license";
 import {
@@ -150,6 +158,153 @@ function mergeGeneratedFiles(existing: GeneratedFile[], incoming: GeneratedFile[
   return Array.from(byPath.values());
 }
 
+type TreeNode = {
+  name: string;
+  path: string;
+  isFile: boolean;
+  children?: TreeNode[];
+};
+
+function buildFileTree(files: GeneratedFile[]): TreeNode[] {
+  const root: TreeNode[] = [];
+  for (const f of files) {
+    const parts = f.path.split("/").filter(Boolean);
+    let level = root;
+    let currentPath = "";
+    parts.forEach((part, i) => {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      const isLast = i === parts.length - 1;
+      let node = level.find((n) => n.name === part && n.isFile === isLast);
+      if (!node) {
+        node = { name: part, path: currentPath, isFile: isLast, children: isLast ? undefined : [] };
+        level.push(node);
+      }
+      if (!isLast) level = node.children!;
+    });
+  }
+  const sortTree = (nodes: TreeNode[]) => {
+    nodes.sort((a, b) => (a.isFile !== b.isFile ? (a.isFile ? 1 : -1) : a.name.localeCompare(b.name)));
+    nodes.forEach((n) => n.children && sortTree(n.children));
+  };
+  sortTree(root);
+  return root;
+}
+
+function VersionHistoryPanel({
+  projectId,
+  onRestore,
+  onClose,
+}: {
+  projectId: string;
+  onRestore: (version: ProjectVersion) => void;
+  onClose: () => void;
+}) {
+  const versions = lsGet<ProjectVersion[]>(K.versions(projectId), []);
+
+  return (
+    <div className="absolute right-0 top-full z-20 mt-1 max-h-80 w-72 overflow-y-auto rounded-md border border-border/70 bg-card shadow-elegant">
+      <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+        <span className="text-xs font-semibold">Version history</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {versions.length === 0 ? (
+        <p className="p-3 text-xs text-muted-foreground">
+          No versions yet — one is saved automatically each time JagX finishes a build.
+        </p>
+      ) : (
+        versions.map((v) => (
+          <button
+            key={v.id}
+            onClick={() => onRestore(v)}
+            className="flex w-full flex-col items-start gap-0.5 border-b border-border/40 px-3 py-2 text-left hover:bg-accent"
+          >
+            <span className="truncate text-xs font-medium">{v.label}</span>
+            <span className="text-[10px] text-muted-foreground">
+              {new Date(v.createdAt).toLocaleString()} · {v.files.length} file{v.files.length === 1 ? "" : "s"}
+            </span>
+          </button>
+        ))
+      )}
+    </div>
+  );
+}
+
+function FileTreeView({
+  files,
+  selectedPath,
+  onSelect,
+}: {
+  files: GeneratedFile[];
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const tree = useMemo(() => buildFileTree(files), [files]);
+  return (
+    <div className="py-2">
+      {tree.map((node) => (
+        <FileTreeNode key={node.path} node={node} depth={0} selectedPath={selectedPath} onSelect={onSelect} />
+      ))}
+    </div>
+  );
+}
+
+function FileTreeNode({
+  node,
+  depth,
+  selectedPath,
+  onSelect,
+}: {
+  node: TreeNode;
+  depth: number;
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const indent = { paddingLeft: `${depth * 14 + 10}px` };
+
+  if (node.isFile) {
+    return (
+      <button
+        onClick={() => onSelect(node.path)}
+        className={`flex w-full items-center gap-1.5 truncate py-1.5 pr-2 text-left text-xs ${
+          selectedPath === node.path
+            ? "bg-gold/10 text-gold"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground"
+        }`}
+        style={indent}
+        title={node.path}
+      >
+        <FileCode2 className="h-3.5 w-3.5 flex-none" />
+        <span className="truncate">{node.name}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 py-1.5 pr-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        style={indent}
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 flex-none" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 flex-none" />
+        )}
+        <Folder className="h-3.5 w-3.5 flex-none" />
+        <span className="truncate">{node.name}</span>
+      </button>
+      {open &&
+        node.children?.map((child) => (
+          <FileTreeNode key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} />
+        ))}
+    </div>
+  );
+}
+
 function ChatPage() {
   const { projectId } = Route.useParams();
   const navigate = useNavigate();
@@ -171,6 +326,11 @@ function ChatPage() {
   const [files, setFiles] = useState<GeneratedFile[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [showActions, setShowActions] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showModelSwitch, setShowModelSwitch] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [deploying, setDeploying] = useState(false);
   const [backendConfig, setBackendConfig] = useState<BackendConfig>(DEFAULT_BACKEND_CONFIG);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -304,11 +464,14 @@ function ChatPage() {
           // Update the live file set (and the preview) the moment each file's
           // fence closes — this is what makes the build feel like it's
           // happening in front of you instead of appearing all at once.
+          // Merged against the project's files as they were when this turn
+          // started, so a response that only touches one file doesn't wipe
+          // out the rest of a multi-file project.
           const liveFiles = extractGeneratedFiles(acc);
           const signature = liveFiles.map((f) => `${f.path}:${f.content.length}`).join("|");
           if (liveFiles.length && signature !== lastFileSignature) {
             lastFileSignature = signature;
-            persistFiles(liveFiles);
+            persistFiles(mergeGeneratedFiles(files, liveFiles));
           }
         },
       });
@@ -324,7 +487,9 @@ function ChatPage() {
 
       const finalFiles = extractGeneratedFiles(full);
       if (finalFiles.length) {
-        persistFiles(finalFiles);
+        const merged = mergeGeneratedFiles(files, finalFiles);
+        persistFiles(merged);
+        saveVersion(merged, extractPlan(full)[0] || finalFiles[0]?.path || "Build");
       } else {
         setMobileView("chat");
       }
@@ -358,6 +523,26 @@ function ChatPage() {
       r.onerror = () => reject(r.error);
       r.readAsDataURL(file);
     });
+  }
+
+  function saveVersion(snapshotFiles: GeneratedFile[], label: string) {
+    const versions = lsGet<ProjectVersion[]>(K.versions(projectId), []);
+    const entry: ProjectVersion = {
+      id: uid(),
+      createdAt: Date.now(),
+      label: (label || "Build").slice(0, 80),
+      files: snapshotFiles,
+    };
+    // Keep the most recent 30 — plenty for rollback, without letting
+    // localStorage grow unbounded on long-running projects.
+    lsSet(K.versions(projectId), [entry, ...versions].slice(0, 30));
+  }
+
+  function restoreVersion(version: ProjectVersion) {
+    persistFiles(version.files);
+    saveVersion(version.files, `Restored: ${version.label}`);
+    setShowHistory(false);
+    toast.success(`Restored "${version.label}"`);
   }
 
   async function handleFiles(fileList: FileList | null) {
@@ -446,6 +631,61 @@ function ChatPage() {
       toast.error(err?.message || "Couldn't build the zip");
     } finally {
       setDownloadingZip(false);
+    }
+  }
+
+  async function shareProject() {
+    if (files.length === 0) return;
+    setSharing(true);
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectName: project?.name || "Untitled", files }),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      const data = JSON.parse(text);
+      const link = `${window.location.origin}/share/${data.slug}`;
+      await navigator.clipboard.writeText(link).catch(() => {});
+      toast.success("Share link copied to clipboard", { description: link });
+    } catch (err: any) {
+      toast.error(err.message || "Couldn't create a share link");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function deployToVercel() {
+    if (files.length === 0) return;
+    if (!settings.vercelToken) {
+      toast.error("Add your Vercel token in Settings first.", {
+        action: { label: "Settings", onClick: () => navigate({ to: "/settings" }) },
+      });
+      return;
+    }
+    setDeploying(true);
+    try {
+      const res = await fetch("/api/vercel-deploy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: settings.vercelToken,
+          projectName: project?.name || "jagx-project",
+          files,
+        }),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+      const data = JSON.parse(text);
+      toast.success("Deployed to Vercel", {
+        description: data.url,
+        action: { label: "Open", onClick: () => window.open(data.url, "_blank") },
+      });
+    } catch (err: any) {
+      toast.error(err.message || "Deploy failed");
+    } finally {
+      setDeploying(false);
     }
   }
 
@@ -622,9 +862,53 @@ function ChatPage() {
             <ArrowLeft className="h-4 w-4" />
             <span className="line-clamp-1">{project.name}</span>
           </Link>
-          <span className="text-xs text-muted-foreground">
-            {activeSkills.length} skill{activeSkills.length === 1 ? "" : "s"} · {modelLabel(settings.model)}
-          </span>
+          <div className="relative flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {activeSkills.length} skill{activeSkills.length === 1 ? "" : "s"} ·
+            </span>
+            <button
+              onClick={() => setShowModelSwitch((v) => !v)}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
+            >
+              {modelLabel(settings.model)}
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </button>
+            {showModelSwitch && (
+              <div className="absolute right-0 top-full z-20 mt-1 max-h-72 w-64 overflow-y-auto rounded-md border border-border/70 bg-card shadow-elegant">
+                {NVIDIA_MODELS.map((m) => {
+                  const locked = m.tier === "pro" && !isPro;
+                  const active = settings.model === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        if (locked) {
+                          toast("That model needs Pro", {
+                            action: { label: "Upgrade", onClick: () => navigate({ to: "/upgrade" }) },
+                          });
+                          return;
+                        }
+                        const next = { ...settings, model: m.id };
+                        setSettings(next);
+                        lsSet(K.settings, next);
+                        setShowModelSwitch(false);
+                      }}
+                      className={`flex w-full items-center justify-between gap-2 border-b border-border/40 px-3 py-2 text-left text-xs ${
+                        active ? "bg-gold/10 text-gold" : locked ? "opacity-50" : "hover:bg-accent"
+                      }`}
+                    >
+                      <span className="truncate">{m.label}</span>
+                      {m.tier === "pro" && (
+                        <span className="flex-none rounded-full border border-gold/50 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-gold">
+                          Pro
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -773,21 +1057,74 @@ function ChatPage() {
               <Code2 className="h-3.5 w-3.5" /> Code
             </button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="relative flex items-center gap-2">
+            <button
+              onClick={() => setShowHistory((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-gold/60 hover:text-foreground"
+              title="Version history"
+            >
+              <History className="h-3.5 w-3.5" />
+            </button>
+            {showHistory && <VersionHistoryPanel projectId={projectId} onRestore={restoreVersion} onClose={() => setShowHistory(false)} />}
             {files.length > 0 && (
-              <button
-                onClick={downloadProjectZip}
-                disabled={downloadingZip}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-gold/60 hover:text-foreground disabled:opacity-50"
-                title="Download every generated file as a .zip"
-              >
-                {downloadingZip ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
+              <div>
+                <button
+                  onClick={() => setShowActions((v) => !v)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-gold/60 hover:text-foreground"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                  Export
+                </button>
+                {showActions && (
+                  <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-md border border-border/70 bg-card shadow-elegant">
+                    <button
+                      onClick={() => {
+                        setShowActions(false);
+                        downloadProjectZip();
+                      }}
+                      disabled={downloadingZip}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent disabled:opacity-50"
+                    >
+                      {downloadingZip ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                      Download .zip
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowActions(false);
+                        shareProject();
+                      }}
+                      disabled={sharing}
+                      className="flex w-full items-center gap-2 border-t border-border/60 px-3 py-2 text-left text-xs hover:bg-accent disabled:opacity-50"
+                    >
+                      {sharing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Share2 className="h-3.5 w-3.5" />
+                      )}
+                      Copy share link
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowActions(false);
+                        deployToVercel();
+                      }}
+                      disabled={deploying}
+                      className="flex w-full items-center gap-2 border-t border-border/60 px-3 py-2 text-left text-xs hover:bg-accent disabled:opacity-50"
+                    >
+                      {deploying ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Rocket className="h-3.5 w-3.5" />
+                      )}
+                      Deploy to Vercel
+                    </button>
+                  </div>
                 )}
-                Download .zip
-              </button>
+              </div>
             )}
             <span className="text-xs text-muted-foreground">
               {files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "No output yet"}
@@ -847,22 +1184,12 @@ function ChatPage() {
             )
           ) : (
             <div className="grid h-full grid-cols-[200px_1fr] overflow-hidden">
-              <div className="overflow-y-auto border-r border-border/60 py-2">
-                {files.map((f) => (
-                  <button
-                    key={f.path}
-                    onClick={() => setActiveFile(f.path)}
-                    className={`flex w-full items-center gap-1.5 truncate px-3 py-1.5 text-left text-xs ${
-                      selectedFile?.path === f.path
-                        ? "bg-gold/10 text-gold"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                    }`}
-                    title={f.path}
-                  >
-                    <FileCode2 className="h-3.5 w-3.5 flex-none" />
-                    <span className="truncate">{f.path}</span>
-                  </button>
-                ))}
+              <div className="overflow-y-auto border-r border-border/60">
+                <FileTreeView
+                  files={files}
+                  selectedPath={selectedFile?.path ?? null}
+                  onSelect={setActiveFile}
+                />
               </div>
               <div className="flex min-w-0 flex-col overflow-hidden">
                 {selectedFile && (

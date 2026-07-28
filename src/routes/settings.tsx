@@ -44,6 +44,7 @@ export const Route = createFileRoute("/settings")({
 function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [reveal, setReveal] = useState(false);
+  const [revealVercel, setRevealVercel] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>("merge");
   const [pendingRestore, setPendingRestore] = useState<{
@@ -373,9 +374,46 @@ function SettingsPage() {
           <BackendConfigManager />
         </Row>
 
-        {/* Backup */}
+        {/* Vercel deploy token */}
         <Row
           label="08"
+          title="Vercel deploy token"
+          subtitle={
+            <>
+              For one-click deploys. Create one at{" "}
+              <a
+                href="https://vercel.com/account/tokens"
+                target="_blank"
+                rel="noreferrer"
+                className="text-gold underline decoration-dotted underline-offset-4 hover:decoration-solid"
+              >
+                vercel.com/account/tokens
+              </a>
+              . Stored on this device only.
+            </>
+          }
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type={revealVercel ? "text" : "password"}
+              value={settings.vercelToken}
+              onChange={(e) => update("vercelToken", e.target.value)}
+              placeholder="vercel_…"
+              className="flex-1 rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-gold/60"
+            />
+            <button
+              onClick={() => setRevealVercel((v) => !v)}
+              className="rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
+              aria-label={revealVercel ? "Hide token" : "Show token"}
+            >
+              {revealVercel ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </Row>
+
+        {/* Backup */}
+        <Row
+          label="09"
           title="Backup & restore"
           subtitle="Everything — projects, chats, skills, settings — as a single JSON file."
         >

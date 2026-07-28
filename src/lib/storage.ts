@@ -74,6 +74,10 @@ export type Settings = {
   /** Let the agent pause and ask clarifying questions before building when
    * a request is genuinely ambiguous, instead of guessing. */
   askBeforeBuilding: boolean;
+  /** Personal Vercel API token (vercel.com/account/tokens) for one-click
+   * deploys of generated projects. Used directly from the browser via our
+   * server proxy — never sent to the AI model. */
+  vercelToken: string;
 };
 
 /** A single file in a project's virtual workspace. */
@@ -81,6 +85,16 @@ export type ProjectFile = {
   path: string;
   lang: string;
   content: string;
+};
+
+/** A snapshot of a project's files after a completed build, so you can
+ * browse and roll back to an earlier state. Capped client-side to the most
+ * recent N entries (see storage.ts usage) to keep localStorage usage sane. */
+export type ProjectVersion = {
+  id: string;
+  createdAt: number;
+  label: string;
+  files: ProjectFile[];
 };
 
 /** An environment variable the user has noted for a project. Stored locally
@@ -126,6 +140,8 @@ export const K = {
   envVars: (projectId: string) => `jagx:envvars:${projectId}`,
   /** Real external backend connection for a project (see BackendConfig). */
   backend: (projectId: string) => `jagx:backend:${projectId}`,
+  /** Snapshots of the file set after each completed build, for rollback. */
+  versions: (projectId: string) => `jagx:versions:${projectId}`,
   skills: "jagx:skills",
   settings: "jagx:settings",
 };
@@ -138,6 +154,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoPreview: false,
   showReasoning: true,
   askBeforeBuilding: true,
+  vercelToken: "",
 };
 
 export function uid() {
