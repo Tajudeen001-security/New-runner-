@@ -17,27 +17,40 @@ function json(body: unknown, status = 200) {
 
 const THIRTY_DAYS_SECONDS = 60 * 60 * 24 * 30;
 
-async function kvSetWithExpiry(key: string, value: string, seconds: number): Promise<boolean> {
+// Same fix as redeem-code.ts: Upstash's REST API takes a Redis command as a
+// JSON array in the POST body (e.g. ["SET", "key", "value", "EX", 100]), not
+// as URL query parameters — and this also avoids URL-encoding a large JSON
+// blob into a path segment, which the old `/set/{key}/{value}` form did.
+async function redisCommand(command: (string | number)[]): Promise<{ ok: boolean; result: any }> {
   const url = process.env.KV_REST_API_URL;
   const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return false;
-  const res = await fetch(
-    `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}?EX=${seconds}`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
-  );
-  return res.ok;
+  if (!url || !token) return { ok: false, result: null };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+    });
+    if (!res.ok) return { ok: false, result: null };
+    const data = await res.json().catch(() => null);
+    if (!data || data.error) return { ok: false, result: null };
+    return { ok: true, result: data.result ?? null };
+  } catch {
+    return { ok: false, result: null };
+  }
+}
+
+async function kvSetWithExpiry(key: string, value: string, seconds: number): Promise<boolean> {
+  const { ok, result } = await redisCommand(["SET", key, value, "EX", seconds]);
+  return ok && result === "OK";
 }
 
 async function kvGet(key: string): Promise<string | null> {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return null;
-  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json().catch(() => null);
-  return data?.result ?? null;
+  const { ok, result } = await redisCommand(["GET", key]);
+  return ok ? result ?? null : null;
 }
 
 type PostBody = { projectName?: unknown; files?: unknown };

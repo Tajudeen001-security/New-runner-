@@ -801,6 +801,12 @@ Once you have enough to build, always answer in this order:
    ...
    \`\`\`
    Use real, sensible file paths (src/, components/, api/, etc). Write complete file contents, not diffs or "// rest unchanged" placeholders.
+   Structure every project the way a real engineer actually would for that stack — not arbitrary flat file names. Follow the standard convention for whatever you're building:
+   - React/Vite web app: \`index.html\` at root, \`src/main.tsx\` (entry), \`src/App.tsx\`, \`src/components/*.tsx\`, \`src/styles.css\`.
+   - Node/Express API: \`src/index.js\` (entry), \`src/routes/*.js\`, \`src/controllers/*.js\`, \`src/models/*.js\`.
+   - Android (Kotlin/Java): \`app/src/main/AndroidManifest.xml\`, \`app/src/main/java/<package>/MainActivity.kt\`, \`app/src/main/res/layout/*.xml\`.
+   - Python backend: \`app/main.py\` or \`app/__init__.py\` (Flask/FastAPI), \`app/routes/*.py\`, \`app/models/*.py\`, \`requirements.txt\`.
+   Use the matching convention for any other stack the user names. This is what makes the file tree and a real deploy look and work the way an actual project in that ecosystem does, not a JagX-specific layout.
    CRITICAL: if a file references another one — an \`index.html\` with \`<link href="styles.css">\` or \`<script src="app.js">\`, a component importing another component — that referenced file MUST also appear as its own fenced block in this same response, at the exact same path. A dangling reference to a file you never actually wrote is the single most common way this preview ends up blank; if you mention a path anywhere, it has to exist.
 3. If — and only if — the whole build is a single static page, you may instead use one \`\`\`html block with no path; the preview will render it directly.
 4. After the files, add a short "### Done" note: one or two sentences on what you built. Add a "### Environment Variables" list if the build needs any (see below). Add a "### Setup Commands" section — as a real \`\`\`bash fenced block — whenever the user would need to run actual terminal commands to get this working outside the preview (installing a real dependency that can't run in-browser, database migrations, a CLI tool's usage, deployment steps). Skip whichever of these don't apply, and skip all of it for tiny tweaks.
@@ -846,7 +852,7 @@ Runtime constraints — this workspace has NO bundler, NO npm install, and NO No
 Building full-stack apps (the user wants something that works "for real", not just a mockup):
 - Design it like a real product: real data model, real validation, real empty/loading/error states. Wire all CRUD directly against the \`db\` helper (or component state for pure UI, never fake/hardcoded lists pretending to be live data) so it's genuinely interactive in preview today.
 - If the user's request implies a real backend/database/auth for production (not just the preview), ALSO write the real server-side files for their target host — e.g. Vercel serverless functions (\`api/todos.ts\` exporting \`export default async function handler(req, res) {...}\` for Node runtime, or \`export async function GET(request) {...}\` returning a \`Response\` for Edge runtime), a schema file, and a real DB client (e.g. \`@vercel/postgres\`, \`drizzle-orm\`, \`prisma\`, or a Supabase/PlanetScale/Neon client) reading connection info from \`process.env\`. These files won't run inside this browser preview (there's no server here) — say so plainly.
-- Whenever you introduce a real env var (DATABASE_URL, AUTH_SECRET, STRIPE_SECRET_KEY, any API key), end with a "### Environment Variables" section listing each \`KEY_NAME\` — what it's for, and whether it's server-only (never exposed to the browser) or safe to expose on the client (must be prefixed the way the target framework expects, e.g. \`VITE_\`/\`NEXT_PUBLIC_\`). Never invent a fake value — tell the user to get their own from the relevant provider and put it in Settings → Environment Variables here (tracked locally) plus their host's dashboard and a git-ignored \`.env.local\` for local dev. Never put real secrets in code you write.
+- Whenever you introduce a real env var (DATABASE_URL, AUTH_SECRET, STRIPE_SECRET_KEY, a Supabase URL/anon key, any API key), end with a "### Environment Variables" section — one bullet per variable, the name wrapped in single backticks, for example: a bullet reading \`SUPABASE_URL\` — your project's API URL from Supabase settings (client-safe). This isn't just documentation: the chat UI parses it and shows the user an inline, secure input box for each one right there, so don't skip this format when a build needs credentials — it's how the user actually provides them without leaving the conversation. Say which are server-only vs client-safe (client-safe ones need the host's prefix, e.g. \`VITE_\`/\`NEXT_PUBLIC_\`). Never invent a fake value.
 - If a real backend base URL is connected for this project (see below), prefer wiring real requests through \`apiFetch\` over writing server files that can't run here at all.
 - You are not limited to JavaScript for backend code — write it in whatever language fits the user's actual stack (Python/FastAPI or Django, Go, Java/Spring, Ruby/Rails, PHP/Laravel, C#/.NET, etc.) if they ask for it or it's the sensible default for their target host. The preview only executes HTML/CSS/JS — backend files in other languages are still written completely and correctly, just clearly marked as needing that language's runtime to actually run.
 - High-stakes domains (banking, payments, healthcare, anything handling money or sensitive personal data): still build the full, real, working UI/UX and interactive prototype in preview — account dashboards, transaction history, transfer flows, balance updates via the \`db\` helper all genuinely work today. But be explicit in the Done note that a production version needs real security review, real auth (not the mock session pattern), encryption at rest, audit logging, and often regulatory compliance (PCI-DSS for card data, banking regulator requirements) — this is a prototype of the experience, not something to deploy as-is for real money without that additional work.
@@ -945,10 +951,51 @@ export function extractPlan(text: string): string[] {
     .filter(Boolean);
 }
 
-/** Pull out the closing "### Done" note, if present. */
+/** Pull out the closing "### Done" note, if present — stops at the next
+ * heading so it doesn't also swallow an "### Environment Variables" section
+ * that follows it. */
 export function extractDoneNote(text: string): string | null {
-  const match = text.match(/###\s*Done\s*\n([\s\S]*)$/i);
+  const match = text.match(/###\s*Done\s*\n([\s\S]*?)(?=\n###|$)/i);
   return match ? match[1].trim() : null;
+}
+
+export type EnvVarRequest = {
+  key: string;
+  description: string;
+  scope: "server" | "client";
+};
+
+/** Pull out the "### Environment Variables" section the model writes when a
+ * build needs real credentials (a database URL, a Supabase anon key, an API
+ * key). The chat UI turns these into an inline "add these securely" form
+ * instead of leaving them as text the user has to act on themselves. */
+export function extractEnvVarRequests(text: string): EnvVarRequest[] {
+  const match = text.match(/###\s*Environment Variables\s*\n([\s\S]*?)(?=\n###|$)/i);
+  if (!match) return [];
+
+  const requests: EnvVarRequest[] = [];
+  for (const rawLine of match[1].split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const keyMatch = line.match(/`([A-Z][A-Z0-9_]*)`/);
+    if (!keyMatch) continue;
+    const key = keyMatch[1];
+    const description = line
+      .replace(keyMatch[0], "")
+      .replace(/^[-*\d.\s:]+/, "")
+      .trim();
+    const scope: "server" | "client" = /client-expos|client-safe|\bpublic\b/i.test(line)
+      ? "client"
+      : "server";
+    requests.push({ key, description: description || "Required for this build", scope });
+  }
+
+  const seen = new Set<string>();
+  return requests.filter((r) => {
+    if (seen.has(r.key)) return false;
+    seen.add(r.key);
+    return true;
+  });
 }
 
 /**

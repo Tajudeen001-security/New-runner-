@@ -20,33 +20,42 @@ function hashCode(code: string) {
 const RECHECK_INTERVAL_MS = 1000 * 60 * 60 * 24 * 30; // same 30-day window as the Stripe flow
 
 // Vercel KV / Upstash Redis, added from your Vercel project's Storage tab
-// (free tier). We only need two commands, so this talks to the REST API
-// directly instead of pulling in an SDK.
-async function kvGet(key: string): Promise<string | null> {
+// (free tier). Talks to the REST API directly instead of pulling in an SDK —
+// Upstash's REST API takes a Redis command as a JSON array in the POST body,
+// e.g. ["SET", "key", "value", "NX"], and returns { result: ... }.
+async function redisCommand(command: (string | number)[]): Promise<{ ok: boolean; result: any }> {
   const url = process.env.KV_REST_API_URL;
   const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return null;
-  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
-  const data = await res.json().catch(() => null);
-  return data?.result ?? null;
+  if (!url || !token) return { ok: false, result: null };
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(command),
+    });
+    if (!res.ok) return { ok: false, result: null };
+    const data = await res.json().catch(() => null);
+    if (!data || data.error) return { ok: false, result: null };
+    return { ok: true, result: data.result ?? null };
+  } catch {
+    return { ok: false, result: null };
+  }
+}
+
+async function kvGet(key: string): Promise<string | null> {
+  const { ok, result } = await redisCommand(["GET", key]);
+  return ok ? result ?? null : null;
 }
 
 async function kvSetIfAbsent(key: string, value: string): Promise<boolean> {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-  if (!url || !token) return false;
-  // NX = only set if the key doesn't already exist — this is what makes
-  // redemption atomic and single-use even if two requests race.
-  const res = await fetch(
-    `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}?NX=true`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
-  );
-  if (!res.ok) return false;
-  const data = await res.json().catch(() => null);
-  return data?.result === "OK";
+  // SET key value NX — only sets if the key doesn't already exist, which is
+  // what makes redemption atomic and single-use even if two requests race.
+  // Returns "OK" if it was set, or null if the key already existed.
+  const { ok, result } = await redisCommand(["SET", key, value, "NX"]);
+  return ok && result === "OK";
 }
 
 type Body = { code?: unknown };

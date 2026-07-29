@@ -16,6 +16,7 @@ import {
   Folder,
   History,
   Image as ImageIcon,
+  KeyRound,
   Loader2,
   MoreHorizontal,
   Paperclip,
@@ -58,9 +59,11 @@ import {
   extractDoneNote,
   extractGeneratedFiles,
   extractPlan,
+  extractEnvVarRequests,
   stripStructuredMarkup,
   BUILTIN_SKILLS,
   type GeneratedFile,
+  type EnvVarRequest,
 } from "../lib/skills";
 
 export const Route = createFileRoute("/chat/$projectId")({
@@ -924,6 +927,7 @@ function ChatPage() {
               key={m.id}
               role={m.role}
               content={m.content}
+              projectId={projectId}
               onOpenFile={(path) => {
                 setActiveFile(path);
                 setTab("code");
@@ -1293,10 +1297,12 @@ function BuildingCard({
 function MessageBubble({
   role,
   content,
+  projectId,
   onOpenFile,
 }: {
   role: string;
   content: string;
+  projectId: string;
   onOpenFile: (path: string) => void;
 }) {
   if (role === "user") {
@@ -1311,6 +1317,7 @@ function MessageBubble({
   const files = extractGeneratedFiles(content);
   const done = extractDoneNote(content);
   const prose = stripStructuredMarkup(content);
+  const envRequests = extractEnvVarRequests(content);
 
   // Nothing structured recognized at all (a plain Q&A answer) — render as
   // markdown-ish text like before.
@@ -1360,6 +1367,92 @@ function MessageBubble({
       {prose && <RichText text={prose} />}
 
       {done && <div className="text-muted-foreground"><RichText text={done} /></div>}
+
+      {envRequests.length > 0 && <CredentialsRequestCard projectId={projectId} requests={envRequests} />}
+    </div>
+  );
+}
+
+/** Inline "please provide these securely" form — appears whenever the model
+ * asks for real credentials (a database URL, an API key, a Supabase anon
+ * key...) that aren't already tracked for this project. Saves straight into
+ * the same per-project env vars Settings uses, so the AI can reference them
+ * by name on the next turn without the user leaving the chat. */
+function CredentialsRequestCard({
+  projectId,
+  requests,
+}: {
+  projectId: string;
+  requests: EnvVarRequest[];
+}) {
+  const [existingKeys, setExistingKeys] = useState<Set<string>>(new Set());
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    const existing = lsGet<{ key: string }[]>(K.envVars(projectId), []);
+    setExistingKeys(new Set(existing.map((e) => e.key)));
+  }, [projectId]);
+
+  const pending = requests.filter((r) => !existingKeys.has(r.key));
+  if (pending.length === 0) return null;
+
+  function save() {
+    const existing = lsGet<
+      { id: string; key: string; value: string; scope: "server" | "client" }[]
+    >(K.envVars(projectId), []);
+    const next = [...existing];
+    for (const r of pending) {
+      const value = (values[r.key] || "").trim();
+      if (!value) continue;
+      next.push({ id: uid(), key: r.key, value, scope: r.scope });
+    }
+    lsSet(K.envVars(projectId), next);
+    setSaved(true);
+    toast.success("Saved — JagX will use these by name in the next build.");
+  }
+
+  if (saved) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 p-3 text-xs text-gold">
+        <Check className="h-4 w-4 flex-none" />
+        Credentials saved for this project.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-gold/40 bg-card/60 p-3">
+      <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.14em] text-gold">
+        <KeyRound className="h-3.5 w-3.5" /> This build needs some credentials
+      </p>
+      {pending.map((r) => (
+        <div key={r.key}>
+          <label className="flex items-center gap-1.5 text-xs font-medium">
+            <span className="font-mono">{r.key}</span>
+            <span className="rounded-full border border-border/60 px-1.5 py-0.5 text-[9px] uppercase text-muted-foreground">
+              {r.scope}
+            </span>
+          </label>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{r.description}</p>
+          <input
+            type="password"
+            value={values[r.key] || ""}
+            onChange={(e) => setValues((v) => ({ ...v, [r.key]: e.target.value }))}
+            placeholder="Paste the value here"
+            className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs outline-none focus:border-gold/60"
+          />
+        </div>
+      ))}
+      <button
+        onClick={save}
+        className="mt-1 w-full rounded-md bg-gold-gradient px-3 py-2 text-xs font-semibold text-primary-foreground shadow-gold"
+      >
+        Save securely for this project
+      </button>
+      <p className="text-[10px] text-muted-foreground">
+        Stored on this device only, in Settings → Environment variables — never sent to the AI model.
+      </p>
     </div>
   );
 }
