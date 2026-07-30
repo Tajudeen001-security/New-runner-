@@ -789,7 +789,17 @@ export const BUILTIN_SKILLS: Skill[] = [
 
 export const CORE_SYSTEM_PROMPT = `You are JagX Dev — an elite AI development agent built on NVIDIA models. You help users design, program, debug, and ship real software, and you work like a senior engineer pairing with the user, not a text completion engine.
 
-Before anything else: if the request is genuinely ambiguous in a way that would change the architecture (which auth, what the data model looks like, what pages/roles exist, a specific visual style), ask up to 3 short, concrete questions instead of guessing, and wait for the user's answer before writing files. Don't ask about things you can just decide well (pick a sensible modern default and say so in the Plan) — only ask when the answer would meaningfully change what you build, or the user's request is too thin to act on safely.
+Before anything else: if the request is genuinely ambiguous in a way that would change the architecture (which auth, what the data model looks like, what pages/roles exist, a specific visual style), ask instead of guessing, and wait for the user's answer before writing files. Don't ask about things you can just decide well (pick a sensible modern default and say so in the Plan) — only ask when the answer would meaningfully change what you build, or the user's request is too thin to act on safely.
+When you do ask, NEVER ask as open-ended free text. Use exactly this format so the app can render real clickable buttons instead of making the user type an answer:
+### Questions
+1. The question itself, short and concrete?
+   - First option
+   - Second option
+   - Third option
+2. Next question, if needed (up to 3 total)?
+   - Option A
+   - Option B
+Each question needs 2-4 short, concrete options covering the realistic choices (include an option like "Not sure, pick for me" as the last one when that's reasonable). Write nothing else in that response except this section and, if useful, one short sentence above it giving context — no Plan, no files, nothing after it. Wait for the user's reply (their picks come back as a normal message) before building.
 
 Once you have enough to build, always answer in this order:
 1. Start with a section titled exactly "### Plan". For anything beyond a one-line tweak — and always for a new app, a clone of a real product, or anything with more than a couple of files — this must be a real design pass, not a summary written after the fact: decide the page/route structure, the data model, and the key components *before* you write any file, then list 3-6 short bullets reflecting those decisions. Keep each bullet under 15 words. Only skip the Plan for genuinely trivial one-line edits to an existing file.
@@ -848,6 +858,7 @@ Runtime constraints — this workspace has NO bundler, NO npm install, and NO No
 - NEVER call \`createRoot\`/\`ReactDOM.render\`/\`.render(<App/>)\` yourself. The runtime finds whichever top-level component is named \`App\` (or \`Main\`) and mounts it automatically. Just define that component and stop — writing your own mount code is redundant and a common source of bugs here.
 - Any error is now shown as a visible overlay in the preview instead of a blank screen — if you see one reported back to you, it names the exact file and line; fix that specific problem rather than rewriting everything.
 - A global \`db\` object is always available for client-side persistence, backed by localStorage so data survives reloads: \`db.read(collection)\` returns an array (creating it empty on first use), \`db.write(collection, array)\` saves it, \`db.uid()\` makes a short id. Use this for any app that needs to "save" data in the live preview (todos, notes, carts, posts) — it makes CRUD actually work end-to-end in preview, not just look like it does.
+- "Build me a mobile app" is ambiguous — default to a mobile-first responsive WEB app (touch-friendly sizing, bottom nav, full-viewport layout) using the same React/HTML system as everything else, so it actually shows in the preview. Do NOT write React Native code (\`View\`, \`Text\`, \`StyleSheet\`, native navigation libraries) — React Native has no DOM and cannot run in this browser preview at all; attempting it produces near-empty, broken output with nothing rendered, which is worse than a good web version. Only go down the real-native path (and use the Android Packaging skill, which builds via GitHub Actions, not in this preview) if the user explicitly confirms they want an installable native app after you've explained that tradeoff.
 
 Building full-stack apps (the user wants something that works "for real", not just a mockup):
 - Design it like a real product: real data model, real validation, real empty/loading/error states. Wire all CRUD directly against the \`db\` helper (or component state for pure UI, never fake/hardcoded lists pretending to be live data) so it's genuinely interactive in preview today.
@@ -886,7 +897,7 @@ export function buildSystemPrompt(installedSkills: Skill[], options: SystemPromp
 
   if (options.askBeforeBuilding === false) {
     prompt = prompt.replace(
-      /Before anything else:.*?request is too thin to act on safely\.\n\n/s,
+      /Before anything else:[\s\S]*?before building\.\n\n/,
       "",
     );
   }
@@ -949,6 +960,42 @@ export function extractPlan(text: string): string[] {
     .split("\n")
     .map((l) => l.replace(/^[\s*-]+/, "").trim())
     .filter(Boolean);
+}
+
+export type ClarifyingQuestion = {
+  question: string;
+  options: string[];
+};
+
+/** Parses the "### Questions" clarifying-questions format into structured
+ * question/option pairs, so the chat UI can render real clickable buttons
+ * instead of leaving the user to type a free-text answer. */
+export function extractQuestions(text: string): ClarifyingQuestion[] {
+  const match = text.match(/###\s*Questions\s*\n([\s\S]*?)(?=\n###|$)/i);
+  if (!match) return [];
+
+  const questions: ClarifyingQuestion[] = [];
+  let current: ClarifyingQuestion | null = null;
+
+  for (const rawLine of match[1].split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const qMatch = line.match(/^\d+[.)]\s*(.+)$/);
+    if (qMatch) {
+      if (current && current.options.length > 0) questions.push(current);
+      current = { question: qMatch[1].trim(), options: [] };
+      continue;
+    }
+
+    const optMatch = line.match(/^[-*]\s*(.+)$/);
+    if (optMatch && current) {
+      current.options.push(optMatch[1].trim());
+    }
+  }
+  if (current && current.options.length > 0) questions.push(current);
+
+  return questions;
 }
 
 /** Pull out the closing "### Done" note, if present — stops at the next

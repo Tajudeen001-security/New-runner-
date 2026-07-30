@@ -60,10 +60,12 @@ import {
   extractGeneratedFiles,
   extractPlan,
   extractEnvVarRequests,
+  extractQuestions,
   stripStructuredMarkup,
   BUILTIN_SKILLS,
   type GeneratedFile,
   type EnvVarRequest,
+  type ClarifyingQuestion,
 } from "../lib/skills";
 
 export const Route = createFileRoute("/chat/$projectId")({
@@ -667,6 +669,18 @@ function ChatPage() {
       });
       return;
     }
+    // Deploy the SAME fully-processed document that already renders
+    // correctly in the preview (Babel bootstrap, db helper, error overlay,
+    // and all) — not the raw source files. The preview only works because
+    // that processing happens client-side right before rendering; shipping
+    // the unprocessed source instead produced a blank page on real Vercel
+    // deployments, since nothing in a real browser bootstraps a bare
+    // App.jsx on its own.
+    const doc = buildPreviewDocument(files, backendConfig.baseUrl ? backendConfig : undefined);
+    if (!doc) {
+      toast.error("This project doesn't have a browser preview to deploy (e.g. a server-only project).");
+      return;
+    }
     setDeploying(true);
     try {
       const res = await fetch("/api/vercel-deploy", {
@@ -675,7 +689,7 @@ function ChatPage() {
         body: JSON.stringify({
           token: settings.vercelToken,
           projectName: project?.name || "jagx-project",
-          files,
+          files: [{ path: "index.html", content: doc }],
         }),
       });
       const text = await res.text();
@@ -784,6 +798,15 @@ function ChatPage() {
     const next = [...messages, userMsg];
     persistMessages(next);
     setPreviewError(null);
+    runAssistant(next, skills, settings);
+  }
+
+  function submitAnswers(qas: { question: string; answer: string }[]) {
+    if (streaming || qas.length === 0) return;
+    const text = qas.map((qa) => `${qa.question} → ${qa.answer}`).join("\n");
+    const userMsg: ChatMessage = { id: uid(), role: "user", content: text, createdAt: Date.now() };
+    const next = [...messages, userMsg];
+    persistMessages(next);
     runAssistant(next, skills, settings);
   }
 
@@ -922,12 +945,14 @@ function ChatPage() {
             </div>
           )}
 
-          {messages.map((m) => (
+          {messages.map((m, i) => (
             <MessageBubble
               key={m.id}
               role={m.role}
               content={m.content}
               projectId={projectId}
+              isLatest={i === messages.length - 1}
+              onSubmitAnswers={submitAnswers}
               onOpenFile={(path) => {
                 setActiveFile(path);
                 setTab("code");
@@ -1298,17 +1323,32 @@ function MessageBubble({
   role,
   content,
   projectId,
+  isLatest,
+  onSubmitAnswers,
   onOpenFile,
 }: {
   role: string;
   content: string;
   projectId: string;
+  isLatest: boolean;
+  onSubmitAnswers: (qas: { question: string; answer: string }[]) => void;
   onOpenFile: (path: string) => void;
 }) {
   if (role === "user") {
     return (
       <div className="ml-auto max-w-[85%] rounded-2xl rounded-tr-md bg-gold-gradient px-4 py-2.5 text-sm text-primary-foreground shadow-gold">
         {content}
+      </div>
+    );
+  }
+
+  const questions = extractQuestions(content);
+  if (questions.length > 0) {
+    const intro = content.slice(0, content.indexOf("### Questions")).trim();
+    return (
+      <div className="max-w-full space-y-3 text-sm leading-relaxed">
+        {intro && <RichText text={intro} />}
+        {isLatest && <QuestionWizardCard questions={questions} onSubmit={onSubmitAnswers} />}
       </div>
     );
   }
@@ -1378,6 +1418,82 @@ function MessageBubble({
  * key...) that aren't already tracked for this project. Saves straight into
  * the same per-project env vars Settings uses, so the AI can reference them
  * by name on the next turn without the user leaving the chat. */
+/** Renders the AI's clarifying questions as an actual click-through wizard —
+ * one question at a time, tap an option to advance, Submit at the end sends
+ * the compiled answers back as a normal message. No typing required. */
+function QuestionWizardCard({
+  questions,
+  onSubmit,
+}: {
+  questions: ClarifyingQuestion[];
+  onSubmit: (qas: { question: string; answer: string }[]) => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState<string[]>(() => new Array(questions.length).fill(""));
+  const [submitted, setSubmitted] = useState(false);
+
+  const current = questions[step];
+  const isLast = step === questions.length - 1;
+
+  function pick(option: string) {
+    const next = [...answers];
+    next[step] = option;
+    setAnswers(next);
+    if (isLast) {
+      setSubmitted(true);
+      onSubmit(questions.map((q, i) => ({ question: q.question, answer: next[i] })));
+    } else {
+      setStep(step + 1);
+    }
+  }
+
+  if (submitted) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 p-3 text-xs text-gold">
+        <Check className="h-4 w-4 flex-none" />
+        Answers sent — building now.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border/60 bg-card/50 p-4">
+      <div className="flex items-center gap-1.5">
+        {questions.map((_, i) => (
+          <span
+            key={i}
+            className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-gold" : "bg-border"}`}
+          />
+        ))}
+      </div>
+      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+        Question {step + 1} of {questions.length}
+      </p>
+      <p className="text-sm font-medium">{current.question}</p>
+      <div className="space-y-1.5">
+        {current.options.map((opt) => (
+          <button
+            key={opt}
+            onClick={() => pick(opt)}
+            className="flex w-full items-center justify-between rounded-md border border-border/60 bg-background px-3 py-2 text-left text-xs transition-colors hover:border-gold/60 hover:bg-gold/5"
+          >
+            {opt}
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        ))}
+      </div>
+      {step > 0 && (
+        <button
+          onClick={() => setStep(step - 1)}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          ← Back
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CredentialsRequestCard({
   projectId,
   requests,
